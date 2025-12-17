@@ -16,7 +16,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from vastai_sdk import VastAI
@@ -57,7 +57,7 @@ DOCKER_IMAGES: dict[str, str] = {
 }
 
 
-def get_env(key: str, default: Optional[str] = None) -> Optional[str]:
+def get_env(key: str, default: str | None = None) -> str | None:
     """
     Get environment variable with optional default value.
 
@@ -90,7 +90,7 @@ def get_env_float(key: str, default: float) -> float:
         return default
 
 
-def extract_gpu_model_number(gpu_name: str) -> Optional[int]:
+def extract_gpu_model_number(gpu_name: str) -> int | None:
     """
     Extract the numeric model number from a GPU name.
 
@@ -150,12 +150,8 @@ class GPUConfig:
         disk_space: Disk space in GB.
     """
 
-    gpu_name: str = field(
-        default_factory=lambda: get_env("DEFAULT_GPU_NAME", DEFAULT_GPU_NAME)
-    )
-    num_gpus: int = field(
-        default_factory=lambda: get_env_int("DEFAULT_NUM_GPUS", DEFAULT_NUM_GPUS)
-    )
+    gpu_name: str = field(default_factory=lambda: get_env("DEFAULT_GPU_NAME", DEFAULT_GPU_NAME))
+    num_gpus: int = field(default_factory=lambda: get_env_int("DEFAULT_NUM_GPUS", DEFAULT_NUM_GPUS))
     max_price: float = field(
         default_factory=lambda: get_env_float("DEFAULT_MAX_PRICE", DEFAULT_MAX_PRICE)
     )
@@ -241,9 +237,9 @@ class Instance:
     gpu_name: str
     num_gpus: int
     status: str
-    ssh_host: Optional[str] = None
-    ssh_port: Optional[int] = None
-    jupyter_url: Optional[str] = None
+    ssh_host: str | None = None
+    ssh_port: int | None = None
+    jupyter_url: str | None = None
 
     @classmethod
     def from_api_response(cls, data: dict[str, Any]) -> Instance:
@@ -267,7 +263,7 @@ class Instance:
         )
 
     @property
-    def ssh_command(self) -> Optional[str]:
+    def ssh_command(self) -> str | None:
         """
         Get SSH command to connect to this instance.
 
@@ -316,8 +312,8 @@ class VastGPUManager:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        config: Optional[GPUConfig] = None,
+        api_key: str | None = None,
+        config: GPUConfig | None = None,
     ) -> None:
         """
         Initialize the Vast.ai GPU Manager.
@@ -340,7 +336,7 @@ class VastGPUManager:
             )
 
         self.config = config or GPUConfig()
-        self._sdk: Optional[VastAI] = None
+        self._sdk: VastAI | None = None
 
         logger.info("VastGPUManager initialized")
 
@@ -362,24 +358,22 @@ class VastGPUManager:
                 self._sdk = VastAI(api_key=self.api_key)
                 logger.debug("VastAI SDK initialized")
             except ImportError as e:
-                raise ImportError(
-                    "vastai-sdk not installed. Run: pip install vastai-sdk"
-                ) from e
+                raise ImportError("vastai-sdk not installed. Run: pip install vastai-sdk") from e
         return self._sdk
 
     def search_gpus(
         self,
-        gpu_name: Optional[str] = None,
-        gpu_family: Optional[str] = None,
-        min_model: Optional[int] = None,
-        num_gpus: Optional[int] = None,
-        min_gpu_ram: Optional[float] = None,
-        min_cpu_ram: Optional[float] = None,
-        max_price: Optional[float] = None,
-        min_reliability: Optional[float] = None,
-        min_cuda: Optional[float] = None,
-        min_dlperf: Optional[float] = None,
-        min_tflops: Optional[float] = None,
+        gpu_name: str | None = None,
+        gpu_family: str | None = None,
+        min_model: int | None = None,
+        num_gpus: int | None = None,
+        min_gpu_ram: float | None = None,
+        min_cpu_ram: float | None = None,
+        max_price: float | None = None,
+        min_reliability: float | None = None,
+        min_cuda: float | None = None,
+        min_dlperf: float | None = None,
+        min_tflops: float | None = None,
         limit: int = 20,
         use_defaults: bool = False,
         order_by: str = "price",
@@ -422,9 +416,7 @@ class VastGPUManager:
             num_gpus = num_gpus if num_gpus is not None else self.config.num_gpus
             max_price = max_price if max_price is not None else self.config.max_price
             min_reliability = (
-                min_reliability
-                if min_reliability is not None
-                else self.config.min_reliability
+                min_reliability if min_reliability is not None else self.config.min_reliability
             )
         else:
             # Use minimal defaults - don't restrict unless asked
@@ -462,8 +454,7 @@ class VastGPUManager:
             if gpu_family:
                 family_upper = gpu_family.upper()
                 result = [
-                    r for r in result
-                    if r.get("gpu_name", "").upper().startswith(family_upper)
+                    r for r in result if r.get("gpu_name", "").upper().startswith(family_upper)
                 ]
 
             # Filter by minimum model number
@@ -544,12 +535,12 @@ class VastGPUManager:
 
     def launch_instance(
         self,
-        gpu_name: Optional[str] = None,
-        image: Optional[str] = None,
-        num_gpus: Optional[int] = None,
-        disk_space: Optional[float] = None,
-        onstart_cmd: Optional[str] = None,
-        env_vars: Optional[dict[str, str]] = None,
+        gpu_name: str | None = None,
+        image: str | None = None,
+        num_gpus: int | None = None,
+        disk_space: float | None = None,
+        onstart_cmd: str | None = None,
+        env_vars: dict[str, str] | None = None,
         jupyter: bool = False,
         ssh: bool = True,
     ) -> dict[str, Any]:
@@ -608,10 +599,10 @@ class VastGPUManager:
     def launch_by_offer_id(
         self,
         offer_id: int,
-        image: Optional[str] = None,
-        disk_space: Optional[float] = None,
-        onstart_cmd: Optional[str] = None,
-        env_vars: Optional[dict[str, str]] = None,
+        image: str | None = None,
+        disk_space: float | None = None,
+        onstart_cmd: str | None = None,
+        env_vars: dict[str, str] | None = None,
         jupyter: bool = False,
         ssh: bool = True,
     ) -> dict[str, Any]:
@@ -670,7 +661,7 @@ class VastGPUManager:
         logger.debug("Found %d instances", len(result) if isinstance(result, list) else 0)
         return result
 
-    def get_instance(self, instance_id: int) -> Optional[dict[str, Any]]:
+    def get_instance(self, instance_id: int) -> dict[str, Any] | None:
         """
         Get details of a specific instance.
 
@@ -783,7 +774,7 @@ class VastGPUManager:
         """
         return self.sdk.show_ssh_keys()
 
-    def get_ssh_command(self, instance_id: int) -> Optional[str]:
+    def get_ssh_command(self, instance_id: int) -> str | None:
         """
         Get the SSH command to connect to an instance.
 
@@ -804,9 +795,9 @@ class VastGPUManager:
 
 
 def quick_launch(
-    gpu_name: Optional[str] = None,
-    image: Optional[str] = None,
-    api_key: Optional[str] = None,
+    gpu_name: str | None = None,
+    image: str | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Quick helper to launch a single GPU instance.

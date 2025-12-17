@@ -9,12 +9,11 @@ import argparse
 import json
 import sys
 import time
-from typing import Optional
 
-from vast_gpu_manager import VastGPUManager, DOCKER_IMAGES
+from vast_gpu_manager import DOCKER_IMAGES, VastGPUManager
 
 
-def get_manager(api_key: Optional[str] = None) -> VastGPUManager:
+def get_manager(api_key: str | None = None) -> VastGPUManager:
     """Get manager instance, with error handling"""
     try:
         return VastGPUManager(api_key=api_key)
@@ -74,11 +73,11 @@ def cmd_search(args):
     last_price_tier = None
     for offer in results:
         # Convert VRAM from MB to GB for display
-        vram_gb = offer.get('gpu_ram', 0) / 1024
+        vram_gb = offer.get("gpu_ram", 0) / 1024
 
         # Calculate value: DLPerf per dollar (higher is better)
-        price = offer.get('dph_total', 0)
-        dlperf = offer.get('dlperf', 0)
+        price = offer.get("dph_total", 0)
+        dlperf = offer.get("dlperf", 0)
         value = dlperf / price if price > 0 else 0
 
         # Group by price tier (round to nearest cent)
@@ -88,7 +87,7 @@ def cmd_search(args):
         last_price_tier = price_tier
 
         # Get location (truncate if too long)
-        location = offer.get('geolocation', 'N/A')
+        location = offer.get("geolocation", "N/A")
         if len(location) > 10:
             location = location[:8] + ".."
 
@@ -139,7 +138,7 @@ def cmd_launch(args):
                 onstart_cmd=args.onstart,
                 env_vars=env_vars,
                 jupyter=args.jupyter,
-                ssh=not args.no_ssh
+                ssh=not args.no_ssh,
             )
             results.append({"offer_id": offer_id, "result": result})
 
@@ -161,7 +160,7 @@ def cmd_launch(args):
             return
 
         # Wait for SSH on all instances
-        print(f"\nWaiting for SSH to be ready", end="", flush=True)
+        print("\nWaiting for SSH to be ready", end="", flush=True)
         ssh_commands = {}
         for _ in range(12):
             time.sleep(5)
@@ -183,7 +182,7 @@ def cmd_launch(args):
             for inst_id, ssh_cmd in ssh_commands.items():
                 print(f"{inst_id}: {ssh_cmd}")
         else:
-            print(f"\nSSH not ready yet. Check with: python cli.py list")
+            print("\nSSH not ready yet. Check with: python cli.py list")
     else:
         result = manager.launch_instance(
             gpu_name=args.gpu,
@@ -193,16 +192,16 @@ def cmd_launch(args):
             onstart_cmd=args.onstart,
             env_vars=env_vars,
             jupyter=args.jupyter,
-            ssh=not args.no_ssh
+            ssh=not args.no_ssh,
         )
 
         if args.json:
             print(json.dumps(result, indent=2, default=str))
         else:
-            if result.get('success'):
-                instance_id = result.get('new_contract')
+            if result.get("success"):
+                instance_id = result.get("new_contract")
                 print(f"Instance {instance_id} launched successfully!")
-                print(f"\nWaiting for SSH to be ready", end="", flush=True)
+                print("\nWaiting for SSH to be ready", end="", flush=True)
 
                 ssh_cmd = None
                 for _ in range(12):
@@ -210,9 +209,9 @@ def cmd_launch(args):
                     print(".", end="", flush=True)
                     instances = manager.list_instances()
                     for inst in instances:
-                        if inst.get('id') == instance_id:
-                            host = inst.get('ssh_host')
-                            port = inst.get('ssh_port')
+                        if inst.get("id") == instance_id:
+                            host = inst.get("ssh_host")
+                            port = inst.get("ssh_port")
                             if host and port:
                                 ssh_cmd = f"ssh -p {port} root@{host}"
                                 break
@@ -223,7 +222,7 @@ def cmd_launch(args):
                 if ssh_cmd:
                     print(f"\n{ssh_cmd}")
                 else:
-                    print(f"\nSSH not ready yet. Check with: python cli.py list")
+                    print("\nSSH not ready yet. Check with: python cli.py list")
             else:
                 print(f"Launch failed: {result}")
 
@@ -299,8 +298,10 @@ def cmd_destroy(args):
 
         if not args.force:
             print(f"Instances to destroy: {', '.join(map(str, instance_ids))}")
-            confirm = input(f"Are you sure you want to destroy ALL {len(instance_ids)} instances? [y/N]: ")
-            if confirm.lower() != 'y':
+            confirm = input(
+                f"Are you sure you want to destroy ALL {len(instance_ids)} instances? [y/N]: "
+            )
+            if confirm.lower() != "y":
                 print("Cancelled")
                 return
 
@@ -321,7 +322,7 @@ def cmd_destroy(args):
 
     if not args.force:
         confirm = input(f"Are you sure you want to destroy instance {args.instance_id}? [y/N]: ")
-        if confirm.lower() != 'y':
+        if confirm.lower() != "y":
             print("Cancelled")
             return
 
@@ -413,55 +414,95 @@ def cmd_images(args):
 def main():
     parser = argparse.ArgumentParser(
         description="Vast.ai GPU Instance Manager",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     # Global options
     parser.add_argument(
-        "--api-key", "-k",
-        help="Vast.ai API key (default: from .env or VASTAI_API_KEY)"
+        "--api-key", "-k", help="Vast.ai API key (default: from .env or VASTAI_API_KEY)"
     )
-    parser.add_argument(
-        "--json", "-j",
-        action="store_true",
-        help="Output in JSON format"
-    )
+    parser.add_argument("--json", "-j", action="store_true", help="Output in JSON format")
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # Search command
     search_parser = subparsers.add_parser("search", help="Search for available GPUs")
-    search_parser.add_argument("--gpu", "-g", help="Exact GPU model (e.g., RTX_4090, A100). Omit to search all GPUs")
-    search_parser.add_argument("--gpu-family", "-f", help="GPU family prefix (e.g., RTX, GTX, Tesla, A100, H100)")
-    search_parser.add_argument("--min-model", type=int, help="Minimum GPU model number (e.g., 3080 = RTX 3080+)")
-    search_parser.add_argument("--num-gpus", "-n", type=int, help="Minimum number of GPUs (default: 1)")
+    search_parser.add_argument(
+        "--gpu", "-g", help="Exact GPU model (e.g., RTX_4090, A100). Omit to search all GPUs"
+    )
+    search_parser.add_argument(
+        "--gpu-family", "-f", help="GPU family prefix (e.g., RTX, GTX, Tesla, A100, H100)"
+    )
+    search_parser.add_argument(
+        "--min-model", type=int, help="Minimum GPU model number (e.g., 3080 = RTX 3080+)"
+    )
+    search_parser.add_argument(
+        "--num-gpus", "-n", type=int, help="Minimum number of GPUs (default: 1)"
+    )
     search_parser.add_argument("--min-gpu-ram", "-r", type=float, help="Minimum GPU RAM in GB")
     search_parser.add_argument("--min-cpu-ram", type=float, help="Minimum system RAM in GB")
-    search_parser.add_argument("--max-price", "-p", type=float, help="Maximum price per hour (USD). Omit for no limit")
-    search_parser.add_argument("--min-reliability", type=float, help="Minimum reliability 0-1. Omit for no filter")
-    search_parser.add_argument("--min-cuda", type=float, help="Minimum CUDA version (e.g., 12.0)")
-    search_parser.add_argument("--min-dlperf", type=float, help="Minimum DLPerf score (deep learning performance)")
-    search_parser.add_argument("--min-tflops", type=float, help="Minimum TFLOPS (compute power)")
-    search_parser.add_argument("--limit", "-l", type=int, default=20, help="Max results (default: 20)")
-    search_parser.add_argument("--use-defaults", "-d", action="store_true", help="Use defaults from .env file")
     search_parser.add_argument(
-        "--order-by", "-o",
-        choices=["price", "gpu_ram", "reliability", "num_gpus", "score", "dlperf", "cpu_ram", "disk_space", "tflops", "cuda", "value", "tflops_value", "price_power"],
-        default="price",
-        help="Sort results by field (default: price). 'value' = DLPerf/$, 'price_power' = price asc + power desc"
+        "--max-price", "-p", type=float, help="Maximum price per hour (USD). Omit for no limit"
     )
-    search_parser.add_argument("--desc", action="store_true", help="Sort descending (default: ascending)")
+    search_parser.add_argument(
+        "--min-reliability", type=float, help="Minimum reliability 0-1. Omit for no filter"
+    )
+    search_parser.add_argument("--min-cuda", type=float, help="Minimum CUDA version (e.g., 12.0)")
+    search_parser.add_argument(
+        "--min-dlperf", type=float, help="Minimum DLPerf score (deep learning performance)"
+    )
+    search_parser.add_argument("--min-tflops", type=float, help="Minimum TFLOPS (compute power)")
+    search_parser.add_argument(
+        "--limit", "-l", type=int, default=20, help="Max results (default: 20)"
+    )
+    search_parser.add_argument(
+        "--use-defaults", "-d", action="store_true", help="Use defaults from .env file"
+    )
+    search_parser.add_argument(
+        "--order-by",
+        "-o",
+        choices=[
+            "price",
+            "gpu_ram",
+            "reliability",
+            "num_gpus",
+            "score",
+            "dlperf",
+            "cpu_ram",
+            "disk_space",
+            "tflops",
+            "cuda",
+            "value",
+            "tflops_value",
+            "price_power",
+        ],
+        default="price",
+        help="Sort results by field (default: price). 'value' = DLPerf/$, 'price_power' = price asc + power desc",
+    )
+    search_parser.add_argument(
+        "--desc", action="store_true", help="Sort descending (default: ascending)"
+    )
     search_parser.set_defaults(func=cmd_search, use_defaults=False, desc=False)
 
     # Launch command
     launch_parser = subparsers.add_parser("launch", help="Launch a new GPU instance")
-    launch_parser.add_argument("--offer-id", "--id", help="Offer ID(s) from search (comma-separated for multiple)")
-    launch_parser.add_argument("--gpu", "-g", help="GPU model (e.g., RTX_4090, A100). Ignored if --offer-id is set")
-    launch_parser.add_argument("--image", "-i", default="pytorch", help="Docker image or shortcut (default: pytorch)")
+    launch_parser.add_argument(
+        "--offer-id", "--id", help="Offer ID(s) from search (comma-separated for multiple)"
+    )
+    launch_parser.add_argument(
+        "--gpu", "-g", help="GPU model (e.g., RTX_4090, A100). Ignored if --offer-id is set"
+    )
+    launch_parser.add_argument(
+        "--image", "-i", default="pytorch", help="Docker image or shortcut (default: pytorch)"
+    )
     launch_parser.add_argument("--num-gpus", "-n", type=int, help="Number of GPUs")
-    launch_parser.add_argument("--disk", "-d", type=float, default=20.0, help="Disk space in GB (default: 20)")
+    launch_parser.add_argument(
+        "--disk", "-d", type=float, default=20.0, help="Disk space in GB (default: 20)"
+    )
     launch_parser.add_argument("--onstart", help="Command to run on start")
-    launch_parser.add_argument("--env", "-e", action="append", help="Environment variable (KEY=VALUE)")
+    launch_parser.add_argument(
+        "--env", "-e", action="append", help="Environment variable (KEY=VALUE)"
+    )
     launch_parser.add_argument("--jupyter", action="store_true", help="Enable Jupyter notebook")
     launch_parser.add_argument("--no-ssh", action="store_true", help="Disable SSH access")
     launch_parser.set_defaults(func=cmd_launch)
@@ -482,7 +523,9 @@ def main():
 
     # Destroy command
     destroy_parser = subparsers.add_parser("destroy", help="Destroy an instance or all instances")
-    destroy_parser.add_argument("instance_id", type=int, nargs="?", help="Instance ID (optional if using --all)")
+    destroy_parser.add_argument(
+        "instance_id", type=int, nargs="?", help="Instance ID (optional if using --all)"
+    )
     destroy_parser.add_argument("--all", "-a", action="store_true", help="Destroy ALL instances")
     destroy_parser.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     destroy_parser.set_defaults(func=cmd_destroy)
@@ -502,7 +545,9 @@ def main():
 
     # Billing command
     billing_parser = subparsers.add_parser("billing", help="Show billing history")
-    billing_parser.add_argument("--limit", "-l", type=int, default=20, help="Max transactions (default: 20)")
+    billing_parser.add_argument(
+        "--limit", "-l", type=int, default=20, help="Max transactions (default: 20)"
+    )
     billing_parser.set_defaults(func=cmd_billing)
 
     args = parser.parse_args()
