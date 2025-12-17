@@ -41,15 +41,18 @@ DEFAULT_GPU_NAME = "RTX_4090"
 DEFAULT_NUM_GPUS = 1
 DEFAULT_MAX_PRICE = 0.50
 DEFAULT_MIN_RELIABILITY = 0.95
-DEFAULT_DOCKER_IMAGE = "pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime"
+DEFAULT_DOCKER_IMAGE = "vastai/pytorch"
 DEFAULT_DISK_SPACE = 20.0
 
 # Common Docker images for ML/AI workloads
+# vastai/* images are pre-cached and start faster
 DOCKER_IMAGES: dict[str, str] = {
-    "pytorch": "pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime",
-    "pytorch_devel": "pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel",
-    "tensorflow": "tensorflow/tensorflow:2.14.0-gpu",
-    "nvidia_cuda": "nvidia/cuda:12.1.0-runtime-ubuntu22.04",
+    "pytorch": "vastai/pytorch",
+    "tensorflow": "vastai/tensorflow",
+    "cuda": "nvidia/cuda:12.1.0-runtime-ubuntu22.04",
+    "cuda_devel": "nvidia/cuda:12.1.0-devel-ubuntu22.04",
+    # Alternative images (not cached, slower to start)
+    "pytorch_official": "pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime",
     "huggingface": "huggingface/transformers-pytorch-gpu:latest",
 }
 
@@ -602,6 +605,60 @@ class VastGPUManager:
         logger.info("Launching instance: gpu=%s, image=%s", gpu_name, image)
         return self.sdk.launch_instance(**kwargs)
 
+    def launch_by_offer_id(
+        self,
+        offer_id: int,
+        image: Optional[str] = None,
+        disk_space: Optional[float] = None,
+        onstart_cmd: Optional[str] = None,
+        env_vars: Optional[dict[str, str]] = None,
+        jupyter: bool = False,
+        ssh: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Launch a new GPU instance by offer ID.
+
+        Args:
+            offer_id: The specific offer ID from search results.
+            image: Docker image to use.
+            disk_space: Disk space in GB.
+            onstart_cmd: Command to run on instance start.
+            env_vars: Environment variables as key-value pairs.
+            jupyter: Enable Jupyter notebook.
+            ssh: Enable SSH access.
+
+        Returns:
+            Instance creation response from API.
+        """
+        image = image if image is not None else self.config.docker_image
+        disk_space = disk_space if disk_space is not None else self.config.disk_space
+
+        # Resolve image shortcut
+        image = DOCKER_IMAGES.get(image, image)
+
+        kwargs: dict[str, Any] = {
+            "id": offer_id,
+            "image": image,
+            "disk": str(disk_space),
+        }
+
+        if onstart_cmd:
+            kwargs["onstart_cmd"] = onstart_cmd
+
+        if env_vars:
+            env_str = " ".join(f"-e {k}={v}" for k, v in env_vars.items())
+            kwargs["env"] = env_str
+
+        if jupyter:
+            kwargs["jupyter"] = True
+            kwargs["jupyter_dir"] = "/workspace"
+
+        if ssh:
+            kwargs["ssh"] = True
+
+        logger.info("Launching instance from offer %d with image=%s", offer_id, image)
+        return self.sdk.create_instance(**kwargs)
+
     def list_instances(self) -> list[dict[str, Any]]:
         """
         List all your instances.
@@ -641,7 +698,7 @@ class VastGPUManager:
             API response dictionary.
         """
         logger.info("Starting instance %d", instance_id)
-        return self.sdk.start_instance(ID=instance_id)
+        return self.sdk.start_instance(id=instance_id)
 
     def stop_instance(self, instance_id: int) -> dict[str, Any]:
         """
@@ -657,7 +714,7 @@ class VastGPUManager:
             API response dictionary.
         """
         logger.info("Stopping instance %d", instance_id)
-        return self.sdk.stop_instance(ID=instance_id)
+        return self.sdk.stop_instance(id=instance_id)
 
     def destroy_instance(self, instance_id: int) -> dict[str, Any]:
         """
@@ -672,7 +729,7 @@ class VastGPUManager:
             API response dictionary.
         """
         logger.warning("Destroying instance %d", instance_id)
-        return self.sdk.destroy_instance(ID=instance_id)
+        return self.sdk.destroy_instance(id=instance_id)
 
     def add_ssh_key(self, public_key: str) -> dict[str, Any]:
         """

@@ -122,21 +122,41 @@ def cmd_launch(args):
                 key, value = env.split("=", 1)
                 env_vars[key] = value
 
-    result = manager.launch_instance(
-        gpu_name=args.gpu,
-        image=image,
-        num_gpus=args.num_gpus,
-        disk_space=args.disk,
-        onstart_cmd=args.onstart,
-        env_vars=env_vars,
-        jupyter=args.jupyter,
-        ssh=not args.no_ssh
-    )
+    # Launch by offer ID or by GPU name
+    if args.offer_id:
+        result = manager.launch_by_offer_id(
+            offer_id=args.offer_id,
+            image=image,
+            disk_space=args.disk,
+            onstart_cmd=args.onstart,
+            env_vars=env_vars,
+            jupyter=args.jupyter,
+            ssh=not args.no_ssh
+        )
+    else:
+        result = manager.launch_instance(
+            gpu_name=args.gpu,
+            image=image,
+            num_gpus=args.num_gpus,
+            disk_space=args.disk,
+            onstart_cmd=args.onstart,
+            env_vars=env_vars,
+            jupyter=args.jupyter,
+            ssh=not args.no_ssh
+        )
 
     if args.json:
         print(json.dumps(result, indent=2, default=str))
     else:
-        print(f"Instance launched: {result}")
+        if result.get('success'):
+            instance_id = result.get('new_contract')
+            print(f"Instance {instance_id} launched successfully!")
+            print(f"\nTo check status and get SSH command:")
+            print(f"  python cli.py list")
+            print(f"\nOr wait a moment and run:")
+            print(f"  python cli.py ssh {instance_id}")
+        else:
+            print(f"Launch failed: {result}")
 
 
 def cmd_list(args):
@@ -163,9 +183,9 @@ def cmd_list(args):
             ssh_cmd = f"ssh -p {port} root@{host}"
 
         print(
-            f"{inst.get('id', 'N/A'):<12} "
-            f"{inst.get('actual_status', 'unknown'):<15} "
-            f"{inst.get('gpu_name', 'N/A'):<20} "
+            f"{inst.get('id') or 'N/A':<12} "
+            f"{inst.get('actual_status') or 'unknown':<15} "
+            f"{inst.get('gpu_name') or 'N/A':<20} "
             f"{ssh_cmd:<30}"
         )
 
@@ -275,7 +295,8 @@ def main():
 
     # Launch command
     launch_parser = subparsers.add_parser("launch", help="Launch a new GPU instance")
-    launch_parser.add_argument("--gpu", "-g", help="GPU model (e.g., RTX_4090, A100)")
+    launch_parser.add_argument("--offer-id", "--id", type=int, help="Specific offer ID from search results")
+    launch_parser.add_argument("--gpu", "-g", help="GPU model (e.g., RTX_4090, A100). Ignored if --offer-id is set")
     launch_parser.add_argument("--image", "-i", default="pytorch", help="Docker image or shortcut (default: pytorch)")
     launch_parser.add_argument("--num-gpus", "-n", type=int, help="Number of GPUs")
     launch_parser.add_argument("--disk", "-d", type=float, default=20.0, help="Disk space in GB (default: 20)")
