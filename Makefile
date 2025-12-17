@@ -1,5 +1,5 @@
 .PHONY: install dev lint format check clean help
-.PHONY: search list balance billing images
+.PHONY: search cheap list balance billing images
 .PHONY: launch destroy destroy-all start stop ssh
 
 # Default Python
@@ -28,6 +28,8 @@ help:
 	@echo "  make search                   Search all GPUs (cheapest first)"
 	@echo "  make search PRICE=0.10        Search GPUs under \$$0.10/hr"
 	@echo "  make search GPU=RTX_4090      Search specific GPU"
+	@echo "  make cheap                    Search cheap GPUs (<\$$0.04, best value)"
+	@echo "  make cheap PRICE=0.06         Override max price"
 	@echo "  make list                     List your instances"
 	@echo "  make balance                  Show account balance"
 	@echo "  make billing                  Show billing history"
@@ -78,6 +80,16 @@ else ifdef GPU
 	$(PYTHON) cli.py search --gpu $(GPU)
 else
 	$(PYTHON) cli.py search
+endif
+
+# Default price for cheap search
+CHEAP_PRICE ?= 0.04
+
+cheap:
+ifdef PRICE
+	$(PYTHON) cli.py search --max-price $(PRICE) --order-by price_power
+else
+	$(PYTHON) cli.py search --max-price $(CHEAP_PRICE) --order-by price_power
 endif
 
 list:
