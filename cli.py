@@ -262,6 +262,63 @@ def cmd_ssh(args):
         sys.exit(1)
 
 
+def cmd_balance(args):
+    """Show account balance"""
+    manager = get_manager(args.api_key)
+    balance = manager.get_balance()
+
+    if args.json:
+        print(json.dumps(balance, indent=2, default=str))
+    else:
+        print(f"Account: {balance.get('email', 'N/A')}")
+        print(f"Credit:  ${balance.get('credit', 0):.2f}")
+        print(f"Spent:   ${balance.get('total_spend', 0):.4f}")
+
+
+def cmd_billing(args):
+    """Show billing history"""
+    from datetime import datetime
+
+    manager = get_manager(args.api_key)
+    invoices = manager.get_invoices(limit=args.limit)
+
+    if args.json:
+        print(json.dumps(invoices, indent=2, default=str))
+        return
+
+    if not invoices:
+        print("No billing history found")
+        return
+
+    print(f"{'Date':<12} {'Type':<10} {'Amount':<10} {'Description':<50}")
+    print("-" * 85)
+
+    for inv in invoices:
+        ts = inv.get("timestamp", 0)
+        if ts > 1e12:  # milliseconds
+            ts = ts / 1000
+        date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else "N/A"
+
+        inv_type = inv.get("type", "N/A")
+        amount = float(inv.get("amount", 0))
+
+        # Format amount with sign
+        if inv_type == "payment":
+            amount_str = f"+${abs(amount):.2f}"
+        else:
+            amount_str = f"-${abs(amount):.3f}"
+
+        desc = inv.get("description", "")
+        if not desc and inv_type == "payment":
+            desc = f"Payment ({inv.get('network', '')} {inv.get('last4', '')})"
+
+        # Truncate description
+        if len(desc) > 48:
+            desc = desc[:46] + ".."
+
+        print(f"{date_str:<12} {inv_type:<10} {amount_str:<10} {desc:<50}")
+
+
 def cmd_images(args):
     """List available Docker image shortcuts"""
     print("Available image shortcuts:\n")
@@ -354,6 +411,15 @@ def main():
     # Images command
     images_parser = subparsers.add_parser("images", help="List Docker image shortcuts")
     images_parser.set_defaults(func=cmd_images)
+
+    # Balance command
+    balance_parser = subparsers.add_parser("balance", help="Show account balance")
+    balance_parser.set_defaults(func=cmd_balance)
+
+    # Billing command
+    billing_parser = subparsers.add_parser("billing", help="Show billing history")
+    billing_parser.add_argument("--limit", "-l", type=int, default=20, help="Max transactions (default: 20)")
+    billing_parser.set_defaults(func=cmd_billing)
 
     args = parser.parse_args()
 

@@ -731,6 +731,36 @@ class VastGPUManager:
         logger.warning("Destroying instance %d", instance_id)
         return self.sdk.destroy_instance(id=instance_id)
 
+    def get_balance(self) -> dict[str, Any]:
+        """
+        Get account balance and user info.
+
+        Returns:
+            Dictionary with credit, total_spend, and other user info.
+        """
+        user = self.sdk.show_user()
+        return {
+            "credit": user.get("credit", 0),
+            "total_spend": abs(user.get("total_spend", 0)),
+            "username": user.get("username"),
+            "email": user.get("email"),
+        }
+
+    def get_invoices(self, limit: int = 20) -> list[dict[str, Any]]:
+        """
+        Get recent invoices/transactions.
+
+        Args:
+            limit: Maximum number of invoices to return.
+
+        Returns:
+            List of invoice dictionaries.
+        """
+        invoices = self.sdk.show_invoices()
+        if isinstance(invoices, list):
+            return invoices[:limit]
+        return []
+
     def add_ssh_key(self, public_key: str) -> dict[str, Any]:
         """
         Add an SSH public key to your account.
