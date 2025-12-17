@@ -2,6 +2,23 @@
 
 CLI tool for managing GPU instances on Vast.ai marketplace.
 
+## Why This Tool?
+
+Training ML/AI models requires GPU power, but cloud GPU pricing varies constantly. Vast.ai is a GPU marketplace where prices can be 5-10x cheaper than AWS/GCP, but managing instances manually is tedious and error-prone.
+
+**This tool automates the workflow:**
+- Search hundreds of GPU offers instantly, sorted by price or performance
+- Launch instances with a single command
+- Get SSH access automatically when the instance is ready
+- Manage multiple instances at once
+- Track costs and billing in real-time
+
+**Key benefits of automation:**
+- Save time: No clicking through web UI
+- Save money: Quickly find the cheapest GPUs that meet your requirements
+- Reproducibility: Same commands, same results
+- Scripting: Integrate into your ML pipelines
+
 ## Setup
 
 ```bash
