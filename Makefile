@@ -1,29 +1,50 @@
-.PHONY: install dev lint format check clean help search list balance
+.PHONY: install dev lint format check clean help
+.PHONY: search list balance billing images
+.PHONY: launch destroy destroy-all start stop ssh
 
 # Default Python
 PYTHON := ./venv/bin/python3
 PIP := ./venv/bin/pip
 
+# Variables for commands (override with: make launch ID=123)
+ID ?=
+PRICE ?=
+GPU ?=
+IMAGE ?= pytorch
+
 help:
 	@echo "Vast.ai GPU CLI - Available commands:"
 	@echo ""
 	@echo "Setup:"
-	@echo "  make install     Install dependencies"
-	@echo "  make dev         Install dev dependencies (pre-commit, ruff)"
+	@echo "  make install        Install dependencies"
+	@echo "  make dev            Install dev dependencies (pre-commit, ruff)"
 	@echo ""
 	@echo "Code quality:"
-	@echo "  make lint        Run linter (ruff check)"
-	@echo "  make format      Format code (ruff format)"
-	@echo "  make check       Run all pre-commit hooks"
+	@echo "  make lint           Run linter (ruff check)"
+	@echo "  make format         Format code (ruff format)"
+	@echo "  make check          Run all pre-commit hooks"
 	@echo ""
-	@echo "GPU commands:"
-	@echo "  make search      Search for available GPUs"
-	@echo "  make list        List your instances"
-	@echo "  make balance     Show account balance"
-	@echo "  make billing     Show billing history"
+	@echo "Search & Info:"
+	@echo "  make search                   Search all GPUs (cheapest first)"
+	@echo "  make search PRICE=0.10        Search GPUs under \$$0.10/hr"
+	@echo "  make search GPU=RTX_4090      Search specific GPU"
+	@echo "  make list                     List your instances"
+	@echo "  make balance                  Show account balance"
+	@echo "  make billing                  Show billing history"
+	@echo "  make images                   Show available Docker images"
+	@echo ""
+	@echo "Instance Management:"
+	@echo "  make launch ID=123            Launch instance by offer ID"
+	@echo "  make launch ID=123,456        Launch multiple instances"
+	@echo "  make ssh ID=123               Get SSH command for instance"
+	@echo "  make start ID=123             Start a stopped instance"
+	@echo "  make stop ID=123              Stop a running instance"
+	@echo "  make destroy ID=123           Destroy an instance"
+	@echo "  make destroy-all              Destroy ALL instances (with confirm)"
+	@echo "  make destroy-all-force        Destroy ALL instances (no confirm)"
 	@echo ""
 	@echo "Utilities:"
-	@echo "  make clean       Remove cache files"
+	@echo "  make clean                    Remove cache files"
 
 # Setup
 install:
@@ -45,9 +66,19 @@ format:
 check:
 	./venv/bin/pre-commit run --all-files
 
-# GPU commands (shortcuts)
+# Search & Info
 search:
+ifdef PRICE
+ifdef GPU
+	$(PYTHON) cli.py search --gpu $(GPU) --max-price $(PRICE)
+else
+	$(PYTHON) cli.py search --max-price $(PRICE)
+endif
+else ifdef GPU
+	$(PYTHON) cli.py search --gpu $(GPU)
+else
 	$(PYTHON) cli.py search
+endif
 
 list:
 	$(PYTHON) cli.py list
@@ -57,6 +88,51 @@ balance:
 
 billing:
 	$(PYTHON) cli.py billing
+
+images:
+	$(PYTHON) cli.py images
+
+# Instance Management
+launch:
+ifndef ID
+	@echo "Error: ID required. Usage: make launch ID=123"
+	@exit 1
+endif
+	$(PYTHON) cli.py launch --id $(ID) --image $(IMAGE)
+
+ssh:
+ifndef ID
+	@echo "Error: ID required. Usage: make ssh ID=123"
+	@exit 1
+endif
+	$(PYTHON) cli.py ssh $(ID)
+
+start:
+ifndef ID
+	@echo "Error: ID required. Usage: make start ID=123"
+	@exit 1
+endif
+	$(PYTHON) cli.py start $(ID)
+
+stop:
+ifndef ID
+	@echo "Error: ID required. Usage: make stop ID=123"
+	@exit 1
+endif
+	$(PYTHON) cli.py stop $(ID)
+
+destroy:
+ifndef ID
+	@echo "Error: ID required. Usage: make destroy ID=123"
+	@exit 1
+endif
+	$(PYTHON) cli.py destroy $(ID)
+
+destroy-all:
+	$(PYTHON) cli.py destroy --all
+
+destroy-all-force:
+	$(PYTHON) cli.py destroy --all --force
 
 # Utilities
 clean:
