@@ -123,17 +123,67 @@ def cmd_launch(args):
                 key, value = env.split("=", 1)
                 env_vars[key] = value
 
-    # Launch by offer ID or by GPU name
+    # Parse offer IDs (can be comma-separated)
+    offer_ids = []
     if args.offer_id:
-        result = manager.launch_by_offer_id(
-            offer_id=args.offer_id,
-            image=image,
-            disk_space=args.disk,
-            onstart_cmd=args.onstart,
-            env_vars=env_vars,
-            jupyter=args.jupyter,
-            ssh=not args.no_ssh
-        )
+        offer_ids = [int(x.strip()) for x in args.offer_id.split(",")]
+
+    # Launch by offer ID(s) or by GPU name
+    if offer_ids:
+        results = []
+        for offer_id in offer_ids:
+            result = manager.launch_by_offer_id(
+                offer_id=offer_id,
+                image=image,
+                disk_space=args.disk,
+                onstart_cmd=args.onstart,
+                env_vars=env_vars,
+                jupyter=args.jupyter,
+                ssh=not args.no_ssh
+            )
+            results.append({"offer_id": offer_id, "result": result})
+
+        if args.json:
+            print(json.dumps(results, indent=2, default=str))
+            return
+
+        # Collect launched instance IDs
+        instance_ids = []
+        for r in results:
+            if r["result"].get("success"):
+                instance_id = r["result"].get("new_contract")
+                instance_ids.append(instance_id)
+                print(f"Instance {instance_id} launched (offer {r['offer_id']})")
+            else:
+                print(f"Failed to launch offer {r['offer_id']}: {r['result']}")
+
+        if not instance_ids:
+            return
+
+        # Wait for SSH on all instances
+        print(f"\nWaiting for SSH to be ready", end="", flush=True)
+        ssh_commands = {}
+        for _ in range(12):
+            time.sleep(5)
+            print(".", end="", flush=True)
+            instances = manager.list_instances()
+            for inst in instances:
+                inst_id = inst.get("id")
+                if inst_id in instance_ids and inst_id not in ssh_commands:
+                    host = inst.get("ssh_host")
+                    port = inst.get("ssh_port")
+                    if host and port:
+                        ssh_commands[inst_id] = f"ssh -p {port} root@{host}"
+            if len(ssh_commands) == len(instance_ids):
+                break
+
+        print()
+        if ssh_commands:
+            print()
+            for inst_id, ssh_cmd in ssh_commands.items():
+                print(f"{inst_id}: {ssh_cmd}")
+        else:
+            print(f"\nSSH not ready yet. Check with: python cli.py list")
     else:
         result = manager.launch_instance(
             gpu_name=args.gpu,
@@ -146,37 +196,36 @@ def cmd_launch(args):
             ssh=not args.no_ssh
         )
 
-    if args.json:
-        print(json.dumps(result, indent=2, default=str))
-    else:
-        if result.get('success'):
-            instance_id = result.get('new_contract')
-            print(f"Instance {instance_id} launched successfully!")
-            print(f"\nWaiting for SSH to be ready", end="", flush=True)
-
-            # Poll for SSH details (max 60 seconds)
-            ssh_cmd = None
-            for _ in range(12):
-                time.sleep(5)
-                print(".", end="", flush=True)
-                instances = manager.list_instances()
-                for inst in instances:
-                    if inst.get('id') == instance_id:
-                        host = inst.get('ssh_host')
-                        port = inst.get('ssh_port')
-                        if host and port:
-                            ssh_cmd = f"ssh -p {port} root@{host}"
-                            break
-                if ssh_cmd:
-                    break
-
-            print()  # New line after dots
-            if ssh_cmd:
-                print(f"\n{ssh_cmd}")
-            else:
-                print(f"\nSSH not ready yet. Check with: python cli.py list")
+        if args.json:
+            print(json.dumps(result, indent=2, default=str))
         else:
-            print(f"Launch failed: {result}")
+            if result.get('success'):
+                instance_id = result.get('new_contract')
+                print(f"Instance {instance_id} launched successfully!")
+                print(f"\nWaiting for SSH to be ready", end="", flush=True)
+
+                ssh_cmd = None
+                for _ in range(12):
+                    time.sleep(5)
+                    print(".", end="", flush=True)
+                    instances = manager.list_instances()
+                    for inst in instances:
+                        if inst.get('id') == instance_id:
+                            host = inst.get('ssh_host')
+                            port = inst.get('ssh_port')
+                            if host and port:
+                                ssh_cmd = f"ssh -p {port} root@{host}"
+                                break
+                    if ssh_cmd:
+                        break
+
+                print()
+                if ssh_cmd:
+                    print(f"\n{ssh_cmd}")
+                else:
+                    print(f"\nSSH not ready yet. Check with: python cli.py list")
+            else:
+                print(f"Launch failed: {result}")
 
 
 def cmd_list(args):
@@ -233,8 +282,42 @@ def cmd_stop(args):
 
 
 def cmd_destroy(args):
-    """Destroy an instance"""
+    """Destroy an instance or all instances"""
     manager = get_manager(args.api_key)
+
+    # Destroy all instances
+    if args.all:
+        instances = manager.list_instances()
+        if not instances:
+            print("No instances to destroy")
+            return
+
+        instance_ids = [inst.get("id") for inst in instances if inst.get("id")]
+        if not instance_ids:
+            print("No instances to destroy")
+            return
+
+        if not args.force:
+            print(f"Instances to destroy: {', '.join(map(str, instance_ids))}")
+            confirm = input(f"Are you sure you want to destroy ALL {len(instance_ids)} instances? [y/N]: ")
+            if confirm.lower() != 'y':
+                print("Cancelled")
+                return
+
+        results = []
+        for inst_id in instance_ids:
+            result = manager.destroy_instance(inst_id)
+            results.append({"instance_id": inst_id, "result": result})
+            print(f"Instance {inst_id} destroyed")
+
+        if args.json:
+            print(json.dumps(results, indent=2, default=str))
+        return
+
+    # Destroy single instance
+    if args.instance_id is None:
+        print("Error: specify instance_id or use --all", file=sys.stderr)
+        sys.exit(1)
 
     if not args.force:
         confirm = input(f"Are you sure you want to destroy instance {args.instance_id}? [y/N]: ")
@@ -372,7 +455,7 @@ def main():
 
     # Launch command
     launch_parser = subparsers.add_parser("launch", help="Launch a new GPU instance")
-    launch_parser.add_argument("--offer-id", "--id", type=int, help="Specific offer ID from search results")
+    launch_parser.add_argument("--offer-id", "--id", help="Offer ID(s) from search (comma-separated for multiple)")
     launch_parser.add_argument("--gpu", "-g", help="GPU model (e.g., RTX_4090, A100). Ignored if --offer-id is set")
     launch_parser.add_argument("--image", "-i", default="pytorch", help="Docker image or shortcut (default: pytorch)")
     launch_parser.add_argument("--num-gpus", "-n", type=int, help="Number of GPUs")
@@ -398,8 +481,9 @@ def main():
     stop_parser.set_defaults(func=cmd_stop)
 
     # Destroy command
-    destroy_parser = subparsers.add_parser("destroy", help="Destroy an instance")
-    destroy_parser.add_argument("instance_id", type=int, help="Instance ID")
+    destroy_parser = subparsers.add_parser("destroy", help="Destroy an instance or all instances")
+    destroy_parser.add_argument("instance_id", type=int, nargs="?", help="Instance ID (optional if using --all)")
+    destroy_parser.add_argument("--all", "-a", action="store_true", help="Destroy ALL instances")
     destroy_parser.add_argument("--force", "-f", action="store_true", help="Skip confirmation")
     destroy_parser.set_defaults(func=cmd_destroy)
 
