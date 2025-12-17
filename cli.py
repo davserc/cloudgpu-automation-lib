@@ -8,6 +8,7 @@ Command-line interface for managing GPU instances on Vast.ai
 import argparse
 import json
 import sys
+import time
 from typing import Optional
 
 from vast_gpu_manager import VastGPUManager, DOCKER_IMAGES
@@ -151,10 +152,29 @@ def cmd_launch(args):
         if result.get('success'):
             instance_id = result.get('new_contract')
             print(f"Instance {instance_id} launched successfully!")
-            print(f"\nTo check status and get SSH command:")
-            print(f"  python cli.py list")
-            print(f"\nOr wait a moment and run:")
-            print(f"  python cli.py ssh {instance_id}")
+            print(f"\nWaiting for SSH to be ready", end="", flush=True)
+
+            # Poll for SSH details (max 60 seconds)
+            ssh_cmd = None
+            for _ in range(12):
+                time.sleep(5)
+                print(".", end="", flush=True)
+                instances = manager.list_instances()
+                for inst in instances:
+                    if inst.get('id') == instance_id:
+                        host = inst.get('ssh_host')
+                        port = inst.get('ssh_port')
+                        if host and port:
+                            ssh_cmd = f"ssh -p {port} root@{host}"
+                            break
+                if ssh_cmd:
+                    break
+
+            print()  # New line after dots
+            if ssh_cmd:
+                print(f"\n{ssh_cmd}")
+            else:
+                print(f"\nSSH not ready yet. Check with: python cli.py list")
         else:
             print(f"Launch failed: {result}")
 
