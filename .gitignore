@@ -1,0 +1,15 @@
+# Secrets
+.env
+keys/
+
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+
+# Claude Code
+.claude/
+
+# Shell history
+.history/
