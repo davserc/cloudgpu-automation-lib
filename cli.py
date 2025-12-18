@@ -411,6 +411,32 @@ def cmd_images(args):
     print("\nYou can also use any Docker image directly.")
 
 
+def cmd_ssh_key(args):
+    """Upload SSH key to Vast.ai account"""
+    from pathlib import Path
+
+    key_path = Path(args.key_file).expanduser()
+
+    if not key_path.exists():
+        print(f"Error: Key file not found: {key_path}", file=sys.stderr)
+        sys.exit(1)
+
+    public_key = key_path.read_text().strip()
+
+    if not public_key.startswith(("ssh-rsa", "ssh-ed25519", "ecdsa-", "ssh-dss")):
+        print("Error: File doesn't look like a public SSH key", file=sys.stderr)
+        sys.exit(1)
+
+    manager = get_manager(args.api_key)
+    result = manager.add_ssh_key(public_key)
+
+    if result.get("success") or result.get("id"):
+        print("SSH key uploaded successfully")
+    else:
+        print(f"Failed to upload SSH key: {result}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Vast.ai GPU Instance Manager",
@@ -549,6 +575,16 @@ def main():
         "--limit", "-l", type=int, default=20, help="Max transactions (default: 20)"
     )
     billing_parser.set_defaults(func=cmd_billing)
+
+    # SSH key command
+    ssh_key_parser = subparsers.add_parser("ssh-key", help="Upload SSH key to Vast.ai")
+    ssh_key_parser.add_argument(
+        "key_file",
+        nargs="?",
+        default="~/.ssh/id_ed25519.pub",
+        help="Path to public key file (default: ~/.ssh/id_ed25519.pub)",
+    )
+    ssh_key_parser.set_defaults(func=cmd_ssh_key)
 
     args = parser.parse_args()
 

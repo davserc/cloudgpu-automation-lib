@@ -31,6 +31,9 @@ make install
 # 3. Configure API key
 cp .env.example .env
 # Edit .env and add your API key from https://cloud.vast.ai/account/
+
+# 4. Setup SSH key (generates key if needed and uploads to Vast.ai)
+make ssh-setup
 ```
 
 ## Usage
@@ -109,6 +112,7 @@ make images
 | Command | Description |
 |---------|-------------|
 | `make install` | Install dependencies |
+| `make ssh-setup` | Generate SSH key and upload to Vast.ai |
 | `make search` | Search available GPUs |
 | `make cheap` | Search cheap GPUs (<$0.04, best value) |
 | `make list` | List your instances |

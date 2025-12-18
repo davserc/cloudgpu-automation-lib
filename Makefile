@@ -1,6 +1,7 @@
 .PHONY: install dev lint format check clean help
 .PHONY: search cheap list balance billing images
 .PHONY: launch destroy destroy-all start stop ssh
+.PHONY: ssh-keygen ssh-upload ssh-setup
 
 # Default Python
 PYTHON := ./venv/bin/python3
@@ -18,6 +19,9 @@ help:
 	@echo "Setup:"
 	@echo "  make install        Install dependencies"
 	@echo "  make dev            Install dev dependencies (pre-commit, ruff)"
+	@echo "  make ssh-setup      Generate SSH key and upload to Vast.ai"
+	@echo "  make ssh-keygen     Generate SSH key (if not exists)"
+	@echo "  make ssh-upload     Upload SSH key to Vast.ai"
 	@echo ""
 	@echo "Code quality:"
 	@echo "  make lint           Run linter (ruff check)"
@@ -56,6 +60,22 @@ install:
 dev: install
 	$(PIP) install pre-commit ruff
 	./venv/bin/pre-commit install
+
+# SSH key path
+SSH_KEY ?= ~/.ssh/id_ed25519
+
+ssh-keygen:
+	@if [ -f $(SSH_KEY) ]; then \
+		echo "SSH key already exists: $(SSH_KEY)"; \
+	else \
+		echo "Generating SSH key..."; \
+		ssh-keygen -t ed25519 -f $(SSH_KEY) -N ""; \
+	fi
+
+ssh-upload:
+	$(PYTHON) cli.py ssh-key $(SSH_KEY).pub
+
+ssh-setup: ssh-keygen ssh-upload
 
 # Code quality
 lint:
