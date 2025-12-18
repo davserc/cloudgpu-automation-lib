@@ -445,6 +445,107 @@ def cmd_ssh_key(args):
         sys.exit(1)
 
 
+def get_ssh_info(manager, instance_id: int) -> tuple[str, int] | None:
+    """Get SSH host and port for an instance."""
+    instance = manager.get_instance(instance_id)
+    if instance:
+        host = instance.get("ssh_host")
+        port = instance.get("ssh_port")
+        if host and port:
+            return (host, port)
+    return None
+
+
+def cmd_upload(args):
+    """Upload files to an instance via SCP."""
+    import subprocess
+
+    manager = get_manager(args.api_key)
+    ssh_info = get_ssh_info(manager, args.instance_id)
+
+    if not ssh_info:
+        print(f"SSH not available for instance {args.instance_id}", file=sys.stderr)
+        sys.exit(1)
+
+    host, port = ssh_info
+    dst = args.dst or "/root/"
+
+    # Build scp command
+    scp_cmd = [
+        "scp",
+        "-P",
+        str(port),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-r",  # recursive
+        args.src,
+        f"root@{host}:{dst}",
+    ]
+
+    print(f"Uploading {args.src} -> {host}:{dst}")
+    result = subprocess.run(scp_cmd)
+    sys.exit(result.returncode)
+
+
+def cmd_download(args):
+    """Download files from an instance via SCP."""
+    import subprocess
+
+    manager = get_manager(args.api_key)
+    ssh_info = get_ssh_info(manager, args.instance_id)
+
+    if not ssh_info:
+        print(f"SSH not available for instance {args.instance_id}", file=sys.stderr)
+        sys.exit(1)
+
+    host, port = ssh_info
+    dst = args.dst or "./"
+
+    # Build scp command
+    scp_cmd = [
+        "scp",
+        "-P",
+        str(port),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-r",  # recursive
+        f"root@{host}:{args.src}",
+        dst,
+    ]
+
+    print(f"Downloading {host}:{args.src} -> {dst}")
+    result = subprocess.run(scp_cmd)
+    sys.exit(result.returncode)
+
+
+def cmd_run(args):
+    """Execute a command on an instance via SSH."""
+    import subprocess
+
+    manager = get_manager(args.api_key)
+    ssh_info = get_ssh_info(manager, args.instance_id)
+
+    if not ssh_info:
+        print(f"SSH not available for instance {args.instance_id}", file=sys.stderr)
+        sys.exit(1)
+
+    host, port = ssh_info
+
+    # Build ssh command
+    ssh_cmd = [
+        "ssh",
+        "-p",
+        str(port),
+        "-o",
+        "StrictHostKeyChecking=no",
+        f"root@{host}",
+        args.cmd,
+    ]
+
+    result = subprocess.run(ssh_cmd)
+    sys.exit(result.returncode)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Vast.ai GPU Instance Manager",
@@ -593,6 +694,26 @@ def main():
         help="Path to public key file (default: ~/.ssh/id_ed25519.pub)",
     )
     ssh_key_parser.set_defaults(func=cmd_ssh_key)
+
+    # Upload command
+    upload_parser = subparsers.add_parser("upload", help="Upload files to instance via SCP")
+    upload_parser.add_argument("instance_id", type=int, help="Instance ID")
+    upload_parser.add_argument("src", help="Local source path (file or directory)")
+    upload_parser.add_argument("--dst", "-d", help="Remote destination path (default: /root/)")
+    upload_parser.set_defaults(func=cmd_upload)
+
+    # Download command
+    download_parser = subparsers.add_parser("download", help="Download files from instance via SCP")
+    download_parser.add_argument("instance_id", type=int, help="Instance ID")
+    download_parser.add_argument("src", help="Remote source path (file or directory)")
+    download_parser.add_argument("--dst", "-d", help="Local destination path (default: ./)")
+    download_parser.set_defaults(func=cmd_download)
+
+    # Run command
+    run_parser = subparsers.add_parser("run", help="Execute command on instance via SSH")
+    run_parser.add_argument("instance_id", type=int, help="Instance ID")
+    run_parser.add_argument("cmd", help="Command to execute")
+    run_parser.set_defaults(func=cmd_run)
 
     args = parser.parse_args()
 

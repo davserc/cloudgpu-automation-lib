@@ -2,6 +2,7 @@
 .PHONY: search cheap list balance billing images
 .PHONY: launch destroy destroy-all start stop ssh
 .PHONY: ssh-keygen ssh-upload ssh-setup
+.PHONY: upload download run
 
 # Default Python
 PYTHON := ./venv/bin/python3
@@ -12,6 +13,9 @@ ID ?=
 PRICE ?=
 GPU ?=
 IMAGE ?= pytorch
+SRC ?=
+DST ?=
+CMD ?=
 
 help:
 	@echo "Vast.ai GPU CLI - Available commands:"
@@ -48,6 +52,11 @@ help:
 	@echo "  make destroy ID=123           Destroy an instance"
 	@echo "  make destroy-all              Destroy ALL instances (with confirm)"
 	@echo "  make destroy-all-force        Destroy ALL instances (no confirm)"
+	@echo ""
+	@echo "File Transfer & Remote Execution:"
+	@echo "  make upload ID=123 SRC=./file DST=/root/   Upload files to instance"
+	@echo "  make download ID=123 SRC=/root/file DST=./ Download files from instance"
+	@echo "  make run ID=123 CMD='python test.py'       Run command on instance"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean                    Remove cache files"
@@ -165,6 +174,48 @@ destroy-all:
 
 destroy-all-force:
 	$(PYTHON) cli.py destroy --all --force
+
+# File Transfer & Remote Execution
+upload:
+ifndef ID
+	@echo "Error: ID required. Usage: make upload ID=123 SRC=./file"
+	@exit 1
+endif
+ifndef SRC
+	@echo "Error: SRC required. Usage: make upload ID=123 SRC=./file"
+	@exit 1
+endif
+ifdef DST
+	$(PYTHON) cli.py upload $(ID) $(SRC) --dst $(DST)
+else
+	$(PYTHON) cli.py upload $(ID) $(SRC)
+endif
+
+download:
+ifndef ID
+	@echo "Error: ID required. Usage: make download ID=123 SRC=/root/file"
+	@exit 1
+endif
+ifndef SRC
+	@echo "Error: SRC required. Usage: make download ID=123 SRC=/root/file"
+	@exit 1
+endif
+ifdef DST
+	$(PYTHON) cli.py download $(ID) $(SRC) --dst $(DST)
+else
+	$(PYTHON) cli.py download $(ID) $(SRC)
+endif
+
+run:
+ifndef ID
+	@echo "Error: ID required. Usage: make run ID=123 CMD='python test.py'"
+	@exit 1
+endif
+ifndef CMD
+	@echo "Error: CMD required. Usage: make run ID=123 CMD='python test.py'"
+	@exit 1
+endif
+	$(PYTHON) cli.py run $(ID) "$(CMD)"
 
 # Utilities
 clean:

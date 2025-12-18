@@ -94,6 +94,35 @@ make destroy-all        # with confirmation
 make destroy-all-force  # skip confirmation
 ```
 
+### File Transfer
+
+```bash
+# Upload files to instance
+make upload ID=12345 SRC=./examples
+
+# Upload to specific directory
+make upload ID=12345 SRC=./script.py DST=/root/work/
+
+# Download files from instance
+make download ID=12345 SRC=/root/results
+
+# Download to specific local directory
+make download ID=12345 SRC=/root/model.pt DST=./models/
+```
+
+### Remote Execution
+
+```bash
+# Run a command on the instance
+make run ID=12345 CMD='nvidia-smi'
+
+# Run a Python script
+make run ID=12345 CMD='python /root/examples/pytorch_test.py'
+
+# Run multiple commands
+make run ID=12345 CMD='cd /root && python train.py'
+```
+
 ### Account Info
 
 ```bash
@@ -105,6 +134,19 @@ make billing
 
 # List available Docker images
 make images
+```
+
+## Examples
+
+The `examples/` folder contains test scripts:
+
+- `pytorch_test.py` - Tests PyTorch GPU availability and runs a simple benchmark
+- `cuda_test.py` - Tests CUDA directly using nvidia-smi and basic operations
+
+```bash
+# Upload and run PyTorch test
+make upload ID=12345 SRC=./examples
+make run ID=12345 CMD='python /root/examples/pytorch_test.py'
 ```
 
 ## All Commands
@@ -122,6 +164,9 @@ make images
 | `make stop ID=X` | Stop running instance |
 | `make destroy ID=X` | Destroy instance |
 | `make destroy-all` | Destroy all instances |
+| `make upload ID=X SRC=path` | Upload files to instance |
+| `make download ID=X SRC=path` | Download files from instance |
+| `make run ID=X CMD='cmd'` | Execute command on instance |
 | `make balance` | Show account balance |
 | `make billing` | Show billing history |
 | `make images` | List Docker images |
