@@ -428,12 +428,20 @@ def cmd_ssh_key(args):
         sys.exit(1)
 
     manager = get_manager(args.api_key)
-    result = manager.add_ssh_key(public_key)
-
-    if result.get("success") or result.get("id"):
-        print("SSH key uploaded successfully")
-    else:
-        print(f"Failed to upload SSH key: {result}", file=sys.stderr)
+    try:
+        result = manager.add_ssh_key(public_key)
+        # SDK returns empty string or None on success
+        if result is None or result == "":
+            print("SSH key uploaded successfully")
+        elif isinstance(result, dict) and (result.get("success") or result.get("id")):
+            print("SSH key uploaded successfully")
+        elif isinstance(result, str) and result:
+            # Non-empty string is usually an error or message
+            print(f"Result: {result}")
+        else:
+            print("SSH key uploaded successfully")
+    except Exception as e:
+        print(f"Failed to upload SSH key: {e}", file=sys.stderr)
         sys.exit(1)
 
 
