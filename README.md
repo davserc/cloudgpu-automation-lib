@@ -10,14 +10,27 @@ Training ML/AI models requires GPU power, but cloud GPU pricing varies constantl
 - Search hundreds of GPU offers instantly, sorted by price or performance
 - Launch instances with a single command
 - Get SSH access automatically when the instance is ready
+- Upload/download files and run commands remotely
 - Manage multiple instances at once
 - Track costs and billing in real-time
 
-**Key benefits of automation:**
-- Save time: No clicking through web UI
-- Save money: Quickly find the cheapest GPUs that meet your requirements
-- Reproducibility: Same commands, same results
-- Scripting: Integrate into your ML pipelines
+## Quick Start
+
+```bash
+# Setup (one time)
+make install
+cp .env.example .env          # Add your API key from https://cloud.vast.ai/account/
+make ssh-setup                # Generate and upload SSH key
+
+# Workflow
+make cheap                    # Find cheap GPUs (<$0.04/hr)
+make launch ID=<offer_id>     # Launch instance (note the instance_id returned)
+make upload ID=<instance_id> SRC=./examples
+make run ID=<instance_id> CMD='python3 /root/examples/cuda_test.py'
+make destroy ID=<instance_id> # Clean up when done
+```
+
+> **Note:** `make launch` uses an **offer ID** (from search results). All other commands use the **instance ID** (returned after launch).
 
 ## Setup
 
@@ -144,29 +157,41 @@ The `examples/` folder contains test scripts:
 - `pytorch_test.py` - Tests PyTorch GPU (requires PyTorch installed)
 
 ```bash
-# Upload and run CUDA test
-make upload ID=12345 SRC=./examples
-make run ID=12345 CMD='python3 /root/examples/cuda_test.py'
+# Full example workflow
+make cheap                                              # Find GPU
+make launch ID=28347297                                 # Launch (returns instance ID, e.g., 29001783)
+make upload ID=29001783 SRC=./examples                  # Upload test scripts
+make run ID=29001783 CMD='python3 /root/examples/cuda_test.py'  # Run test
+make destroy ID=29001783                                # Clean up
 ```
 
 ## All Commands
 
 | Command | Description |
 |---------|-------------|
+| **Setup** | |
 | `make install` | Install dependencies |
 | `make ssh-setup` | Generate SSH key and upload to Vast.ai |
+| `make ssh-keygen` | Generate SSH key only |
+| `make ssh-upload` | Upload SSH key to Vast.ai only |
+| **Search** | |
 | `make search` | Search available GPUs |
+| `make search PRICE=X` | Search GPUs under $X/hr |
+| `make search GPU=X` | Search specific GPU model |
 | `make cheap` | Search cheap GPUs (<$0.04, best value) |
-| `make list` | List your instances |
+| **Instances** | |
 | `make launch ID=X` | Launch instance by offer ID |
+| `make list` | List your instances |
 | `make ssh ID=X` | Get SSH command |
 | `make start ID=X` | Start stopped instance |
 | `make stop ID=X` | Stop running instance |
 | `make destroy ID=X` | Destroy instance |
 | `make destroy-all` | Destroy all instances |
+| **File Transfer** | |
 | `make upload ID=X SRC=path` | Upload files to instance |
 | `make download ID=X SRC=path` | Download files from instance |
 | `make run ID=X CMD='cmd'` | Execute command on instance |
+| **Account** | |
 | `make balance` | Show account balance |
 | `make billing` | Show billing history |
 | `make images` | List Docker images |
