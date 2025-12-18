@@ -3,12 +3,38 @@
 
 import subprocess
 import sys
+from datetime import datetime
+from pathlib import Path
+
+
+class Logger:
+    """Simple logger that writes to both stdout and file."""
+
+    def __init__(self, log_path: str = "/root/logs/cuda_test.log"):
+        self.log_path = Path(log_path)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = open(self.log_path, "w")
+        self.write(f"CUDA Test - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+    def write(self, msg: str):
+        print(msg, end="")
+        self.file.write(msg)
+        self.file.flush()
+
+    def writeln(self, msg: str = ""):
+        self.write(msg + "\n")
+
+    def close(self):
+        self.file.close()
+
+
+log = None
 
 
 def run_cmd(cmd, description):
     """Run a command and print output."""
-    print(f"\n{description}")
-    print("-" * 50)
+    log.writeln(f"\n{description}")
+    log.writeln("-" * 50)
     try:
         result = subprocess.run(
             cmd,
@@ -18,22 +44,25 @@ def run_cmd(cmd, description):
             timeout=30,
         )
         if result.stdout:
-            print(result.stdout)
+            log.write(result.stdout)
         if result.returncode != 0 and result.stderr:
-            print(f"Error: {result.stderr}")
+            log.writeln(f"Error: {result.stderr}")
         return result.returncode == 0
     except subprocess.TimeoutExpired:
-        print("Command timed out")
+        log.writeln("Command timed out")
         return False
     except Exception as e:
-        print(f"Failed: {e}")
+        log.writeln(f"Failed: {e}")
         return False
 
 
 def main():
-    print("=" * 50)
-    print("CUDA Direct Test")
-    print("=" * 50)
+    global log
+    log = Logger()
+
+    log.writeln("=" * 50)
+    log.writeln("CUDA Direct Test")
+    log.writeln("=" * 50)
 
     all_passed = True
 
@@ -60,8 +89,8 @@ def main():
     )
 
     # Try a simple CUDA operation with Python
-    print("\nPython CUDA Check")
-    print("-" * 50)
+    log.writeln("\nPython CUDA Check")
+    log.writeln("-" * 50)
     try:
         import torch
 
@@ -69,23 +98,24 @@ def main():
             # Simple CUDA operation
             x = torch.tensor([1.0, 2.0, 3.0], device="cuda")
             y = x * 2
-            print(f"CUDA tensor operation: {x.tolist()} * 2 = {y.tolist()}")
-            print("PyTorch CUDA: OK")
+            log.writeln(f"CUDA tensor operation: {x.tolist()} * 2 = {y.tolist()}")
+            log.writeln("PyTorch CUDA: OK")
         else:
-            print("PyTorch CUDA: Not available")
-            all_passed = False
+            log.writeln("PyTorch CUDA: Not available")
     except ImportError:
-        print("PyTorch not installed")
+        log.writeln("PyTorch not installed")
     except Exception as e:
-        print(f"PyTorch CUDA error: {e}")
-        all_passed = False
+        log.writeln(f"PyTorch CUDA error: {e}")
 
-    print("\n" + "=" * 50)
+    log.writeln("\n" + "=" * 50)
     if all_passed:
-        print("SUCCESS: CUDA test passed!")
+        log.writeln("SUCCESS: CUDA test passed!")
     else:
-        print("WARNING: Some tests failed")
-    print("=" * 50)
+        log.writeln("WARNING: Some tests failed")
+    log.writeln("=" * 50)
+
+    log.writeln(f"\nLog saved to: {log.log_path}")
+    log.close()
 
     return 0 if all_passed else 1
 
