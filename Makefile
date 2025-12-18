@@ -56,7 +56,7 @@ help:
 	@echo "File Transfer & Remote Execution:"
 	@echo "  make upload ID=123 SRC=./file DST=/root/   Upload files to instance"
 	@echo "  make download ID=123 SRC=/root/file DST=./ Download files from instance"
-	@echo "  make run ID=123 CMD='python test.py'       Run command on instance"
+	@echo "  make run ID=123 CMD='python3 test.py'      Run command on instance"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean                    Remove cache files"

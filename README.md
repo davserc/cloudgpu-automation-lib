@@ -117,10 +117,10 @@ make download ID=12345 SRC=/root/model.pt DST=./models/
 make run ID=12345 CMD='nvidia-smi'
 
 # Run a Python script
-make run ID=12345 CMD='python /root/examples/pytorch_test.py'
+make run ID=12345 CMD='python3 /root/examples/cuda_test.py'
 
 # Run multiple commands
-make run ID=12345 CMD='cd /root && python train.py'
+make run ID=12345 CMD='cd /root && python3 train.py'
 ```
 
 ### Account Info
@@ -140,13 +140,13 @@ make images
 
 The `examples/` folder contains test scripts:
 
-- `pytorch_test.py` - Tests PyTorch GPU availability and runs a simple benchmark
-- `cuda_test.py` - Tests CUDA directly using nvidia-smi and basic operations
+- `cuda_test.py` - Tests CUDA directly using nvidia-smi (works with any image)
+- `pytorch_test.py` - Tests PyTorch GPU (requires PyTorch installed)
 
 ```bash
-# Upload and run PyTorch test
+# Upload and run CUDA test
 make upload ID=12345 SRC=./examples
-make run ID=12345 CMD='python /root/examples/pytorch_test.py'
+make run ID=12345 CMD='python3 /root/examples/cuda_test.py'
 ```
 
 ## All Commands
