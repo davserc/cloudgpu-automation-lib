@@ -135,6 +135,7 @@ def cmd_launch(args):
                 offer_id=offer_id,
                 image=image,
                 disk_space=args.disk,
+                ports=args.ports,
                 onstart_cmd=args.onstart,
                 env_vars=env_vars,
                 jupyter=args.jupyter,
@@ -189,6 +190,7 @@ def cmd_launch(args):
             image=image,
             num_gpus=args.num_gpus,
             disk_space=args.disk,
+            ports=args.ports,
             onstart_cmd=args.onstart,
             env_vars=env_vars,
             jupyter=args.jupyter,
@@ -633,6 +635,10 @@ def main():
     launch_parser.add_argument("--num-gpus", "-n", type=int, help="Number of GPUs")
     launch_parser.add_argument(
         "--disk", "-d", type=float, default=20.0, help="Disk space in GB (default: 20)"
+    )
+    launch_parser.add_argument(
+        "--ports",
+        help="Ports to expose (comma-separated, e.g., 5000,8888)",
     )
     launch_parser.add_argument("--onstart", help="Command to run on start")
     launch_parser.add_argument(
