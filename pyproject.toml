@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vast-gpu-automation"
+version = "0.1.0"
+description = "Vast.ai GPU automation helpers for on-demand training services"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "vastai-sdk>=0.1.0",
+  "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["vast_service", "vast_gpu_manager"]
+

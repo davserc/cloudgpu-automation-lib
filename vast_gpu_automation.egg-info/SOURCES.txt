@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+vast_gpu_manager.py
+vast_service.py
+vast_gpu_automation.egg-info/PKG-INFO
+vast_gpu_automation.egg-info/SOURCES.txt
+vast_gpu_automation.egg-info/dependency_links.txt
+vast_gpu_automation.egg-info/requires.txt
+vast_gpu_automation.egg-info/top_level.txt

@@ -13,9 +13,21 @@ ID ?=
 PRICE ?=
 GPU ?=
 IMAGE ?= pytorch
+PORTS ?=
+ONSTART ?=
 SRC ?=
 DST ?=
 CMD ?=
+PORTS_ARG :=
+ONSTART_ARG :=
+
+ifdef PORTS
+PORTS_ARG := --ports $(PORTS)
+endif
+
+ifdef ONSTART
+ONSTART_ARG := --onstart $(ONSTART)
+endif
 
 help:
 	@echo "Vast.ai GPU CLI - Available commands:"
@@ -139,7 +151,7 @@ ifndef ID
 	@echo "Error: ID required. Usage: make launch ID=123"
 	@exit 1
 endif
-	$(PYTHON) cli.py launch --id $(ID) --image $(IMAGE)
+	$(PYTHON) cli.py launch --id $(ID) --image $(IMAGE) $(PORTS_ARG) $(ONSTART_ARG)
 
 ssh:
 ifndef ID
@@ -222,3 +234,6 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type f -name "*.pyo" -delete 2>/dev/null || true
+
+checkstatus:
+	./scripts/check_vast.sh ${ID}

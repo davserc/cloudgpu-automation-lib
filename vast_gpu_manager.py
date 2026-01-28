@@ -539,6 +539,7 @@ class VastGPUManager:
         image: str | None = None,
         num_gpus: int | None = None,
         disk_space: float | None = None,
+        ports: str | None = None,
         onstart_cmd: str | None = None,
         env_vars: dict[str, str] | None = None,
         jupyter: bool = False,
@@ -555,6 +556,7 @@ class VastGPUManager:
             num_gpus: Number of GPUs to rent.
                 Defaults to config value if not specified.
             disk_space: Disk space in GB. Defaults to config value.
+            ports: Comma-separated ports to expose (e.g., "5000,8888").
             onstart_cmd: Command to run on instance start.
             env_vars: Environment variables as key-value pairs.
             jupyter: Enable Jupyter notebook.
@@ -579,12 +581,24 @@ class VastGPUManager:
             "disk": str(disk_space),
         }
 
+        env_parts: list[str] = []
+
         if onstart_cmd:
             kwargs["onstart_cmd"] = onstart_cmd
 
         if env_vars:
-            env_str = " ".join(f"-e {k}={v}" for k, v in env_vars.items())
-            kwargs["env"] = env_str
+            env_parts.extend(f"-e {k}={v}" for k, v in env_vars.items())
+
+        if ports:
+            for port in ports.split(","):
+                port = port.strip()
+                if not port:
+                    continue
+                mapping = port if ":" in port else f"{port}:{port}"
+                env_parts.append(f"-p {mapping}")
+
+        if env_parts:
+            kwargs["env"] = " ".join(env_parts)
 
         if jupyter:
             kwargs["jupyter"] = True
@@ -601,6 +615,7 @@ class VastGPUManager:
         offer_id: int,
         image: str | None = None,
         disk_space: float | None = None,
+        ports: str | None = None,
         onstart_cmd: str | None = None,
         env_vars: dict[str, str] | None = None,
         jupyter: bool = False,
@@ -613,6 +628,7 @@ class VastGPUManager:
             offer_id: The specific offer ID from search results.
             image: Docker image to use.
             disk_space: Disk space in GB.
+            ports: Comma-separated ports to expose (e.g., "5000,8888").
             onstart_cmd: Command to run on instance start.
             env_vars: Environment variables as key-value pairs.
             jupyter: Enable Jupyter notebook.
@@ -633,12 +649,24 @@ class VastGPUManager:
             "disk": str(disk_space),
         }
 
+        env_parts: list[str] = []
+
         if onstart_cmd:
             kwargs["onstart_cmd"] = onstart_cmd
 
         if env_vars:
-            env_str = " ".join(f"-e {k}={v}" for k, v in env_vars.items())
-            kwargs["env"] = env_str
+            env_parts.extend(f"-e {k}={v}" for k, v in env_vars.items())
+
+        if ports:
+            for port in ports.split(","):
+                port = port.strip()
+                if not port:
+                    continue
+                mapping = port if ":" in port else f"{port}:{port}"
+                env_parts.append(f"-p {mapping}")
+
+        if env_parts:
+            kwargs["env"] = " ".join(env_parts)
 
         if jupyter:
             kwargs["jupyter"] = True
