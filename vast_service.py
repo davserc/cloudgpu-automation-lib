@@ -75,7 +75,9 @@ def find_cheapest_offer(
 
     if max_cuda is not None:
         offers = [
-            o for o in offers if o.get("cuda_max_good") is not None and o["cuda_max_good"] <= max_cuda
+            o
+            for o in offers
+            if o.get("cuda_max_good") is not None and o["cuda_max_good"] <= max_cuda
         ]
 
     if not offers:
@@ -235,7 +237,9 @@ def destroy_with_retries(
             if attempt < retries:
                 time.sleep(backoff_sec * attempt)
             else:
-                logger.error("Failed to destroy instance %s after %s attempts", instance_id, retries)
+                logger.error(
+                    "Failed to destroy instance %s after %s attempts", instance_id, retries
+                )
     if last_error:
         raise last_error
 
@@ -252,6 +256,11 @@ def train_with_cheapest_instance(
     artifact_dst: str | Path = "./",
     log_path: str | Path | None = None,
     raise_on_nonzero: bool = True,
+    gcp_sa_b64: str | None = None,
+    dataset_gs_uri: str | None = None,
+    dataset_archive_name: str | None = None,
+    extract_cmd: str | None = None,
+    install_gsutil: bool = False,
     max_price: float | None = None,
     max_cuda: float | None = 12.9,
     destroy_retries: int = 3,
@@ -274,16 +283,43 @@ def train_with_cheapest_instance(
     if not offer:
         raise RuntimeError("No offers found that match the constraints")
 
+    env_vars = None
+    onstart_cmd = None
+
+    if gcp_sa_b64:
+        env_vars = {"GCP_SA_B64": gcp_sa_b64}
+        onstart_parts = []
+        if install_gsutil:
+            onstart_parts.append("apt-get update && apt-get install -y google-cloud-cli")
+        onstart_parts.append("echo $GCP_SA_B64 | base64 -d > /root/gcp.json")
+        onstart_parts.append("export GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json")
+        onstart_cmd = " && ".join(onstart_parts)
+
     launch = launch_offer(
         manager,
         offer_id=int(offer["id"]),
         image=image,
         ports=ports,
+        env_vars=env_vars,
+        onstart_cmd=onstart_cmd,
     )
 
     exit_code: int | None = None
     try:
-        upload(manager, launch.instance_id, dataset_src, dataset_dst)
+        if dataset_gs_uri:
+            if not gcp_sa_b64:
+                raise ValueError("gcp_sa_b64 is required when dataset_gs_uri is provided")
+            archive_name = dataset_archive_name or dataset_gs_uri.rstrip("/").split("/")[-1]
+            archive_path = f"{dataset_dst.rstrip('/')}/{archive_name}"
+            cmds: list[str] = [f"mkdir -p {dataset_dst}"]
+            cmds.append(f"gsutil -m cp {dataset_gs_uri} {archive_path}")
+            if extract_cmd:
+                cmds.append(extract_cmd.format(archive=archive_path, dst=dataset_dst))
+            elif archive_name.endswith(".tar.gz") or archive_name.endswith(".tgz"):
+                cmds.append(f"tar -xzf {archive_path} -C {dataset_dst}")
+            run(manager, launch.instance_id, " && ".join(cmds))
+        else:
+            upload(manager, launch.instance_id, dataset_src, dataset_dst)
         try:
             if log_path is None:
                 exit_code = run(manager, launch.instance_id, run_cmd)
