@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -327,11 +328,12 @@ class VastGPUManager:
         Raises:
             APIKeyError: If no API key is provided or found.
         """
-        self.api_key = api_key or get_env("VASTAI_API_KEY")
+        raw_key = api_key or get_env("VASTAI_API_KEY") or get_env("VAST_API_KEY")
+        self.api_key = raw_key.strip() if isinstance(raw_key, str) else raw_key
         if not self.api_key:
             raise APIKeyError(
                 "API key required. Pass api_key parameter, "
-                "set VASTAI_API_KEY environment variable, "
+                "set VASTAI_API_KEY or VAST_API_KEY environment variable, "
                 "or add it to .env file"
             )
 
@@ -353,12 +355,17 @@ class VastGPUManager:
         """
         if self._sdk is None:
             try:
-                from vastai_sdk import VastAI
+                try:
+                    from vastai import VastAI
+                except ImportError:
+                    from vastai_sdk import VastAI
 
                 self._sdk = VastAI(api_key=self.api_key)
                 logger.debug("VastAI SDK initialized")
             except ImportError as e:
-                raise ImportError("vastai-sdk not installed. Run: pip install vastai-sdk") from e
+                raise ImportError(
+                    "vastai-sdk not installed. Run: pip install vastai-sdk"
+                ) from e
         return self._sdk
 
     def search_gpus(
@@ -447,7 +454,11 @@ class VastGPUManager:
         query = " ".join(query_parts)
         logger.debug("Search query: %s", query)
 
-        result = self.sdk.search_offers(query=query)
+        # Use no_default to avoid implicit verified/external filters in the SDK.
+        result = self.sdk.search_offers(query=query, no_default=True)
+        if not result:
+            # SDK may return empty results in some environments; fallback to REST.
+            result = self._search_offers_rest(query, limit)
 
         if isinstance(result, list):
             # Filter by GPU family (prefix match)
@@ -532,6 +543,54 @@ class VastGPUManager:
             return sorted_result[:limit]
 
         return result
+
+    def _search_offers_rest(self, query: str, limit: int) -> list[dict[str, Any]]:
+        """Fallback search using REST API when SDK returns empty results."""
+        import requests
+
+        def _parse_value(value: str) -> Any:
+            v = value.strip().strip("\"'")
+            if v.lower() in ("true", "false"):
+                return v.lower() == "true"
+            try:
+                if "." in v:
+                    return float(v)
+                return int(v)
+            except ValueError:
+                return v
+
+        def _query_to_dict(q: str) -> dict[str, Any]:
+            res: dict[str, Any] = {}
+            for part in q.split():
+                match = re.match(r"^([a-zA-Z0-9_]+)\s*(>=|<=|!=|=|>|<)\s*(.+)$", part)
+                if not match:
+                    continue
+                field, op, value = match.groups()
+                op_map = {
+                    ">=": "gte",
+                    "<=": "lte",
+                    ">": "gt",
+                    "<": "lt",
+                    "!=": "neq",
+                    "=": "eq",
+                }
+                res.setdefault(field, {})
+                res[field][op_map[op]] = _parse_value(value)
+            return res
+
+        url = "https://console.vast.ai/api/v0/bundles/"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = _query_to_dict(query)
+        payload["limit"] = int(limit)
+        payload["order"] = [["dph_total", "asc"]]
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("offers", []) if isinstance(data, dict) else []
+        except Exception as exc:
+            logger.warning("REST search failed: %s", exc)
+            return []
 
     def launch_instance(
         self,

@@ -2,12 +2,14 @@
 Vast.ai service automation helpers.
 
 Use this module from a long-running Python service to automate:
-search -> launch -> upload -> run -> download -> stop/destroy.
+search -> launch -> download (GCS) -> run -> download -> destroy.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import shlex
 import subprocess
 import time
 from dataclasses import dataclass
@@ -52,7 +54,14 @@ def wait_for_ssh(
     while time.time() < deadline:
         ssh_info = _get_ssh_info(manager, instance_id)
         if ssh_info:
-            return ssh_info
+            host, port = ssh_info
+            try:
+                import socket
+
+                with socket.create_connection((host, port), timeout=5):
+                    return ssh_info
+            except OSError:
+                pass
         time.sleep(poll_interval_sec)
     raise TimeoutError(f"SSH not available for instance {instance_id} after {timeout_sec}s")
 
@@ -63,13 +72,21 @@ def find_cheapest_offer(
     max_cuda: float | None = None,
     limit: int = 100,
 ) -> dict[str, Any] | None:
-    """Return the cheapest offer that satisfies the optional max_cuda constraint."""
+    """Return the best-value offer that satisfies optional constraints."""
     offers = manager.search_gpus(
         max_price=max_price,
         limit=limit,
-        order_by="price",
+        order_by="price_power",
         order_desc=False,
     )
+    if not offers:
+        # Fallback: some environments return empty results with price_power.
+        offers = manager.search_gpus(
+            max_price=max_price,
+            limit=limit,
+            order_by="price",
+            order_desc=False,
+        )
     if not isinstance(offers, list):
         return None
 
@@ -112,31 +129,6 @@ def launch_offer(
         raise RuntimeError(f"Failed to launch offer {offer_id}: {response}")
 
     return LaunchResult(instance_id=int(instance_id), offer_id=offer_id, raw_response=response)
-
-
-def upload(
-    manager: VastGPUManager,
-    instance_id: int,
-    src: str | Path,
-    dst: str = "/root/",
-    scp_bin: str = "scp",
-) -> None:
-    host, port = wait_for_ssh(manager, instance_id)
-    src_path = str(src)
-    scp_cmd = [
-        scp_bin,
-        "-P",
-        str(port),
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-r",
-        src_path,
-        f"root@{host}:{dst}",
-    ]
-    logger.info("Uploading %s -> %s:%s", src_path, host, dst)
-    subprocess.run(scp_cmd, check=True)
 
 
 def download(
@@ -187,6 +179,30 @@ def run(
     if completed.returncode != 0:
         raise subprocess.CalledProcessError(completed.returncode, ssh_cmd)
     return completed.returncode
+
+
+def run_with_retries(
+    manager: VastGPUManager,
+    instance_id: int,
+    cmd: str,
+    retries: int = 5,
+    backoff_sec: float = 5.0,
+    ssh_bin: str = "ssh",
+) -> int:
+    """Run a command with retries to handle transient SSH errors."""
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            return run(manager, instance_id, cmd, ssh_bin=ssh_bin)
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(backoff_sec * attempt)
+            else:
+                break
+    if last_error:
+        raise last_error
+    return 1
 
 
 def run_and_capture(
@@ -249,7 +265,6 @@ def train_with_cheapest_instance(
     *,
     image: str,
     ports: str | None,
-    dataset_src: str | Path,
     dataset_dst: str,
     run_cmd: str,
     artifact_src: str,
@@ -261,7 +276,13 @@ def train_with_cheapest_instance(
     dataset_archive_name: str | None = None,
     extract_cmd: str | None = None,
     install_gsutil: bool = False,
-    max_price: float | None = None,
+    train_dataset_url: str | None = None,
+    train_env: dict[str, str] | None = None,
+    ssh_timeout_sec: int = 900,
+    ssh_poll_interval_sec: int = 10,
+    cmd_retries: int = 10,
+    cmd_backoff_sec: float = 10.0,
+    max_price: float | None = 0.04,
     max_cuda: float | None = 12.9,
     destroy_retries: int = 3,
     destroy_backoff_sec: float = 5.0,
@@ -270,7 +291,7 @@ def train_with_cheapest_instance(
     End-to-end workflow:
     1) find cheapest offer (optional max_cuda)
     2) launch instance
-    3) upload dataset
+    3) download dataset (GCS)
     4) run command
     5) download artifact
     6) destroy instance (always, with retries)
@@ -283,6 +304,9 @@ def train_with_cheapest_instance(
     if not offer:
         raise RuntimeError("No offers found that match the constraints")
 
+    if gcp_sa_b64 is None:
+        gcp_sa_b64 = os.environ.get("TRAIN_GCP_SA_B64") or os.environ.get("GCP_SA_B64")
+
     env_vars = None
     onstart_cmd = None
 
@@ -291,8 +315,8 @@ def train_with_cheapest_instance(
         onstart_parts = []
         if install_gsutil:
             onstart_parts.append("apt-get update && apt-get install -y google-cloud-cli")
-        onstart_parts.append("echo $GCP_SA_B64 | base64 -d > /root/gcp.json")
-        onstart_parts.append("export GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json")
+        onstart_parts.append("printf %s \"$GCP_SA_B64\" | tr -d '\\r' | base64 -d > /root/gcp.json")
+        onstart_parts.append("chmod 600 /root/gcp.json")
         onstart_cmd = " && ".join(onstart_parts)
 
     launch = launch_offer(
@@ -303,6 +327,26 @@ def train_with_cheapest_instance(
         env_vars=env_vars,
         onstart_cmd=onstart_cmd,
     )
+    wait_for_ssh(
+        manager,
+        launch.instance_id,
+        timeout_sec=ssh_timeout_sec,
+        poll_interval_sec=ssh_poll_interval_sec,
+    )
+
+    if train_dataset_url is None and dataset_gs_uri:
+        train_dataset_url = dataset_gs_uri
+
+    if not train_dataset_url:
+        raise ValueError("train_dataset_url is required (e.g. gs://bucket/path)")
+
+    env_vars_cmd: dict[str, str] = {"TRAIN_DATASET_URL": train_dataset_url}
+    if gcp_sa_b64:
+        env_vars_cmd["GOOGLE_APPLICATION_CREDENTIALS"] = "/root/gcp.json"
+    if train_env:
+        env_vars_cmd.update(train_env)
+    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars_cmd.items())
+    run_cmd_with_dataset = f"{env_prefix} {run_cmd}"
 
     exit_code: int | None = None
     try:
@@ -312,19 +356,43 @@ def train_with_cheapest_instance(
             archive_name = dataset_archive_name or dataset_gs_uri.rstrip("/").split("/")[-1]
             archive_path = f"{dataset_dst.rstrip('/')}/{archive_name}"
             cmds: list[str] = [f"mkdir -p {dataset_dst}"]
-            cmds.append(f"gsutil -m cp {dataset_gs_uri} {archive_path}")
+            if gcp_sa_b64:
+                cmds.append("test -s /root/gcp.json")
+                cmds.append(
+                    "GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json "
+                    "gcloud auth activate-service-account --key-file /root/gcp.json "
+                    "2>/dev/null || true"
+                )
+                cmds.append(
+                    "GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json "
+                    f"gsutil -m cp {dataset_gs_uri} {archive_path}"
+                )
+            else:
+                cmds.append(f"gsutil -m cp {dataset_gs_uri} {archive_path}")
             if extract_cmd:
                 cmds.append(extract_cmd.format(archive=archive_path, dst=dataset_dst))
             elif archive_name.endswith(".tar.gz") or archive_name.endswith(".tgz"):
                 cmds.append(f"tar -xzf {archive_path} -C {dataset_dst}")
-            run(manager, launch.instance_id, " && ".join(cmds))
-        else:
-            upload(manager, launch.instance_id, dataset_src, dataset_dst)
+            run_with_retries(
+                manager,
+                launch.instance_id,
+                " && ".join(cmds),
+                retries=cmd_retries,
+                backoff_sec=cmd_backoff_sec,
+            )
         try:
             if log_path is None:
-                exit_code = run(manager, launch.instance_id, run_cmd)
+                exit_code = run_with_retries(
+                    manager,
+                    launch.instance_id,
+                    run_cmd_with_dataset,
+                    retries=cmd_retries,
+                    backoff_sec=cmd_backoff_sec,
+                )
             else:
-                exit_code = run_and_capture(manager, launch.instance_id, run_cmd, log_path)
+                exit_code = run_and_capture(
+                    manager, launch.instance_id, run_cmd_with_dataset, log_path
+                )
         except subprocess.CalledProcessError as exc:
             exit_code = exc.returncode
             if raise_on_nonzero:
