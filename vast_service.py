@@ -72,15 +72,41 @@ def find_cheapest_offer(
     max_cuda: float | None = None,
     limit: int = 100,
 ) -> dict[str, Any] | None:
-    """Return the best-value offer that satisfies optional constraints."""
+    """Return the best-value "cheap" offer that satisfies optional constraints."""
+    offers = _rank_offers(manager, max_price=max_price, max_cuda=max_cuda, limit=limit)
+    return offers[0] if offers else None
+
+
+def _rank_offers(
+    manager: VastGPUManager,
+    max_price: float | None = None,
+    max_cuda: float | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return offers ranked by value (DLPerf/$), then VRAM, then price."""
+    def _is_discouraged_gpu(gpu_name: str) -> bool:
+        name = gpu_name.upper()
+        if "TESLA P4" in name:
+            return True
+        if "QUADRO P2000" in name:
+            return True
+        if "TITAN" in name and "TITAN RTX" not in name:
+            return True
+        if "GTX" in name:
+            # Discard GTX 10-series (older/less efficient for training)
+            for model in ("1050", "1060", "1070", "1080", "1090"):
+                if f"GTX {model}" in name:
+                    return True
+        return False
+
     offers = manager.search_gpus(
         max_price=max_price,
         limit=limit,
-        order_by="price_power",
-        order_desc=False,
+        order_by="value",
+        order_desc=True,
     )
     if not offers:
-        # Fallback: some environments return empty results with price_power.
+        # Fallback: some environments return empty results with value ordering.
         offers = manager.search_gpus(
             max_price=max_price,
             limit=limit,
@@ -88,7 +114,7 @@ def find_cheapest_offer(
             order_desc=False,
         )
     if not isinstance(offers, list):
-        return None
+        return []
 
     if max_cuda is not None:
         offers = [
@@ -97,11 +123,40 @@ def find_cheapest_offer(
             if o.get("cuda_max_good") is not None and o["cuda_max_good"] <= max_cuda
         ]
 
-    if not offers:
-        return None
+    offers = [
+        o
+        for o in offers
+        if o.get("gpu_name")
+        and not _is_discouraged_gpu(o.get("gpu_name", ""))
+        and (o.get("dlperf") or 0) > 0
+        and (o.get("dph_total") or 0) > 0
+    ]
 
-    offers.sort(key=lambda o: o.get("dph_total", float("inf")))
-    return offers[0]
+    if not offers:
+        return []
+
+    if max_price is None:
+        # Define "cheap" as within 2x the cheapest offer.
+        min_price = min(o.get("dph_total", float("inf")) for o in offers)
+        cheap_cap = min_price * 2.0 if min_price != float("inf") else None
+        if cheap_cap:
+            cheap_offers = [o for o in offers if o.get("dph_total", 0) <= cheap_cap]
+            if cheap_offers:
+                offers = cheap_offers
+
+    if not offers:
+        return []
+
+    # Rank by value first, then VRAM, then price.
+    def _score_key(o: dict[str, Any]) -> tuple[float, float, float]:
+        price = o.get("dph_total", 0) or 0
+        dlperf = o.get("dlperf", 0) or 0
+        vram_gb = (o.get("gpu_ram", 0) or 0) / 1024.0
+        value = dlperf / price if price > 0 else 0
+        return (value, vram_gb, -price)
+
+    offers.sort(key=_score_key, reverse=True)
+    return offers
 
 
 def launch_offer(
@@ -278,12 +333,13 @@ def train_with_cheapest_instance(
     install_gsutil: bool = False,
     train_dataset_url: str | None = None,
     train_env: dict[str, str] | None = None,
-    ssh_timeout_sec: int = 900,
+    ssh_timeout_sec: int = 120,
     ssh_poll_interval_sec: int = 10,
     cmd_retries: int = 10,
     cmd_backoff_sec: float = 10.0,
     max_price: float | None = 0.04,
     max_cuda: float | None = 12.9,
+    max_launch_attempts: int = 3,
     destroy_retries: int = 3,
     destroy_backoff_sec: float = 5.0,
 ) -> LaunchResult:
@@ -300,12 +356,12 @@ def train_with_cheapest_instance(
     even when the remote command fails (non-zero).
     """
     manager = VastGPUManager(api_key=api_key)
-    offer = find_cheapest_offer(manager, max_price=max_price, max_cuda=max_cuda)
-    if not offer:
+    offers = _rank_offers(manager, max_price=max_price, max_cuda=max_cuda)
+    if not offers:
         raise RuntimeError("No offers found that match the constraints")
 
     if gcp_sa_b64 is None:
-        gcp_sa_b64 = os.environ.get("TRAIN_GCP_SA_B64") or os.environ.get("GCP_SA_B64")
+        gcp_sa_b64 = os.environ.get("GCP_SA_B64")
 
     env_vars = None
     onstart_cmd = None
@@ -319,20 +375,45 @@ def train_with_cheapest_instance(
         onstart_parts.append("chmod 600 /root/gcp.json")
         onstart_cmd = " && ".join(onstart_parts)
 
-    launch = launch_offer(
-        manager,
-        offer_id=int(offer["id"]),
-        image=image,
-        ports=ports,
-        env_vars=env_vars,
-        onstart_cmd=onstart_cmd,
-    )
-    wait_for_ssh(
-        manager,
-        launch.instance_id,
-        timeout_sec=ssh_timeout_sec,
-        poll_interval_sec=ssh_poll_interval_sec,
-    )
+    launch: LaunchResult | None = None
+    last_boot_error: Exception | None = None
+    attempts = 0
+    for offer in offers:
+        if attempts >= max_launch_attempts:
+            break
+        attempts += 1
+        launch = launch_offer(
+            manager,
+            offer_id=int(offer["id"]),
+            image=image,
+            ports=ports,
+            env_vars=env_vars,
+            onstart_cmd=onstart_cmd,
+        )
+        try:
+            wait_for_ssh(
+                manager,
+                launch.instance_id,
+                timeout_sec=ssh_timeout_sec,
+                poll_interval_sec=ssh_poll_interval_sec,
+            )
+            last_boot_error = None
+            break
+        except TimeoutError as exc:
+            last_boot_error = exc
+            # Instance didn't come up in time; destroy and try next offer.
+            destroy_with_retries(
+                manager,
+                launch.instance_id,
+                retries=destroy_retries,
+                backoff_sec=destroy_backoff_sec,
+            )
+            launch = None
+
+    if launch is None:
+        raise RuntimeError(
+            f"No instance booted within {ssh_timeout_sec}s after {attempts} attempts"
+        ) from last_boot_error
 
     if train_dataset_url is None and dataset_gs_uri:
         train_dataset_url = dataset_gs_uri

@@ -87,7 +87,7 @@ def cmd_search(args):
         last_price_tier = price_tier
 
         # Get location (truncate if too long)
-        location = offer.get("geolocation", "N/A")
+        location = offer.get("geolocation") or "N/A"
         if len(location) > 10:
             location = location[:8] + ".."
 
