@@ -33,6 +33,45 @@ def _resolve_image(image: str) -> str:
     return DOCKER_IMAGES.get(image, image)
 
 
+def _format_offer_header() -> str:
+    return (
+        f"{'ID':<10} "
+        f"{'GPU':<16} "
+        f"{'#':<2} "
+        f"{'VRAM':<5} "
+        f"{'$/hr':<7} "
+        f"{'DLP':<6} "
+        f"{'TF':<5} "
+        f"{'DLP/$':<6} "
+        f"{'CUDA':<5} "
+        f"{'Rel':<4} "
+        f"{'Location':<10}"
+    )
+
+
+def _format_offer_line(offer: dict[str, Any]) -> str:
+    vram_gb = (offer.get("gpu_ram", 0) or 0) / 1024
+    price = offer.get("dph_total", 0) or 0
+    dlperf = offer.get("dlperf", 0) or 0
+    value = dlperf / price if price > 0 else 0
+    location = offer.get("geolocation") or "N/A"
+    if len(location) > 10:
+        location = location[:8] + ".."
+    return (
+        f"{offer.get('id', 'N/A'):<10} "
+        f"{offer.get('gpu_name', 'N/A'):<16} "
+        f"{offer.get('num_gpus', 0):<2} "
+        f"{vram_gb:<4.0f}G "
+        f"${price:<6.3f} "
+        f"{dlperf:<6.1f} "
+        f"{offer.get('total_flops', 0):<5.1f} "
+        f"{value:<6.0f} "
+        f"{offer.get('cuda_max_good', 0):<5.1f} "
+        f"{offer.get('reliability', 0) * 100:<4.0f} "
+        f"{location:<10}"
+    )
+
+
 def _get_ssh_info(manager: VastGPUManager, instance_id: int) -> tuple[str, int] | None:
     instance = manager.get_instance(instance_id)
     if instance:
@@ -423,6 +462,10 @@ def train_with_cheapest_instance(
             break
 
         attempts += 1
+        logger.info("Selected offer:")
+        logger.info("%s", _format_offer_header())
+        logger.info("%s", "-" * 90)
+        logger.info("%s", _format_offer_line(next_offer))
         launch = launch_offer(
             manager,
             offer_id=int(next_offer["id"]),
