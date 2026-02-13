@@ -69,21 +69,26 @@ def wait_for_ssh(
 def find_cheapest_offer(
     manager: VastGPUManager,
     max_price: float | None = None,
+    min_cuda: float | None = None,
     max_cuda: float | None = None,
     limit: int = 100,
 ) -> dict[str, Any] | None:
     """Return the best-value "cheap" offer that satisfies optional constraints."""
-    offers = _rank_offers(manager, max_price=max_price, max_cuda=max_cuda, limit=limit)
+    offers = _rank_offers(
+        manager, max_price=max_price, min_cuda=min_cuda, max_cuda=max_cuda, limit=limit
+    )
     return offers[0] if offers else None
 
 
 def _rank_offers(
     manager: VastGPUManager,
     max_price: float | None = None,
+    min_cuda: float | None = None,
     max_cuda: float | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Return offers ranked by value (DLPerf/$), then VRAM, then price."""
+
     def _is_discouraged_gpu(gpu_name: str) -> bool:
         name = gpu_name.upper()
         if "TESLA P4" in name:
@@ -121,6 +126,12 @@ def _rank_offers(
             o
             for o in offers
             if o.get("cuda_max_good") is not None and o["cuda_max_good"] <= max_cuda
+        ]
+    if min_cuda is not None:
+        offers = [
+            o
+            for o in offers
+            if o.get("cuda_max_good") is not None and o["cuda_max_good"] >= min_cuda
         ]
 
     offers = [
@@ -356,6 +367,7 @@ def train_with_cheapest_instance(
     cmd_retries: int = 10,
     cmd_backoff_sec: float = 10.0,
     max_price: float | None = 0.04,
+    min_cuda: float | None = 12.8,
     max_cuda: float | None = 12.9,
     max_launch_attempts: int = 5,
     launch_retry_backoff_sec: float = 5.0,
@@ -397,7 +409,7 @@ def train_with_cheapest_instance(
     last_boot_error: Exception | None = None
     attempts = 0
     while attempts < max_launch_attempts:
-        offers = _rank_offers(manager, max_price=max_price, max_cuda=max_cuda)
+        offers = _rank_offers(manager, max_price=max_price, min_cuda=min_cuda, max_cuda=max_cuda)
         if not offers:
             break
         next_offer = None
