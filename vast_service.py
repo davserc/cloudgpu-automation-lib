@@ -295,6 +295,9 @@ def destroy_with_retries(
     instance_id: int,
     retries: int = 3,
     backoff_sec: float = 5.0,
+    verify: bool = True,
+    verify_timeout_sec: int = 60,
+    verify_poll_interval_sec: int = 5,
 ) -> None:
     """Destroy an instance with retries in case the API call fails."""
     last_error: Exception | None = None
@@ -302,6 +305,21 @@ def destroy_with_retries(
         try:
             logger.info("Destroying instance %s (attempt %s/%s)", instance_id, attempt, retries)
             manager.destroy_instance(instance_id)
+            if verify:
+                deadline = time.time() + verify_timeout_sec
+                while time.time() < deadline:
+                    instances = manager.list_instances()
+                    if not isinstance(instances, list):
+                        break
+                    if not any(inst.get("id") == instance_id for inst in instances):
+                        return
+                    time.sleep(verify_poll_interval_sec)
+                logger.warning(
+                    "Instance %s still present after destroy attempt %s", instance_id, attempt
+                )
+                if attempt < retries:
+                    time.sleep(backoff_sec * attempt)
+                continue
             return
         except Exception as exc:  # noqa: BLE001 - surface API failures
             last_error = exc
@@ -340,6 +358,7 @@ def train_with_cheapest_instance(
     max_price: float | None = 0.04,
     max_cuda: float | None = 12.9,
     max_launch_attempts: int = 3,
+    launch_retry_backoff_sec: float = 5.0,
     destroy_retries: int = 3,
     destroy_backoff_sec: float = 5.0,
 ) -> LaunchResult:
@@ -356,9 +375,8 @@ def train_with_cheapest_instance(
     even when the remote command fails (non-zero).
     """
     manager = VastGPUManager(api_key=api_key)
-    offers = _rank_offers(manager, max_price=max_price, max_cuda=max_cuda)
-    if not offers:
-        raise RuntimeError("No offers found that match the constraints")
+    tried_offer_ids: set[int] = set()
+    stale_instance_ids: list[int] = []
 
     if gcp_sa_b64 is None:
         gcp_sa_b64 = os.environ.get("GCP_SA_B64")
@@ -378,13 +396,24 @@ def train_with_cheapest_instance(
     launch: LaunchResult | None = None
     last_boot_error: Exception | None = None
     attempts = 0
-    for offer in offers:
-        if attempts >= max_launch_attempts:
+    while attempts < max_launch_attempts:
+        offers = _rank_offers(manager, max_price=max_price, max_cuda=max_cuda)
+        if not offers:
             break
+        next_offer = None
+        for offer in offers:
+            offer_id = int(offer.get("id", 0) or 0)
+            if offer_id and offer_id not in tried_offer_ids:
+                next_offer = offer
+                tried_offer_ids.add(offer_id)
+                break
+        if next_offer is None:
+            break
+
         attempts += 1
         launch = launch_offer(
             manager,
-            offer_id=int(offer["id"]),
+            offer_id=int(next_offer["id"]),
             image=image,
             ports=ports,
             env_vars=env_vars,
@@ -402,15 +431,34 @@ def train_with_cheapest_instance(
         except TimeoutError as exc:
             last_boot_error = exc
             # Instance didn't come up in time; destroy and try next offer.
-            destroy_with_retries(
-                manager,
-                launch.instance_id,
-                retries=destroy_retries,
-                backoff_sec=destroy_backoff_sec,
-            )
+            try:
+                destroy_with_retries(
+                    manager,
+                    launch.instance_id,
+                    retries=destroy_retries,
+                    backoff_sec=destroy_backoff_sec,
+                )
+            except Exception as destroy_exc:  # noqa: BLE001 - log and keep retrying
+                logger.warning(
+                    "Failed to destroy instance %s after boot timeout: %s",
+                    launch.instance_id,
+                    destroy_exc,
+                )
+                stale_instance_ids.append(launch.instance_id)
             launch = None
+            time.sleep(launch_retry_backoff_sec)
 
     if launch is None:
+        for instance_id in stale_instance_ids:
+            try:
+                destroy_with_retries(
+                    manager,
+                    instance_id,
+                    retries=destroy_retries,
+                    backoff_sec=destroy_backoff_sec,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Final cleanup failed for instance %s: %s", instance_id, exc)
         raise RuntimeError(
             f"No instance booted within {ssh_timeout_sec}s after {attempts} attempts"
         ) from last_boot_error
