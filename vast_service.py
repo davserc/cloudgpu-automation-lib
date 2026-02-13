@@ -357,7 +357,7 @@ def train_with_cheapest_instance(
     cmd_backoff_sec: float = 10.0,
     max_price: float | None = 0.04,
     max_cuda: float | None = 12.9,
-    max_launch_attempts: int = 3,
+    max_launch_attempts: int = 5,
     launch_retry_backoff_sec: float = 5.0,
     destroy_retries: int = 3,
     destroy_backoff_sec: float = 5.0,
