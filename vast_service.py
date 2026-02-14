@@ -219,6 +219,11 @@ def launch_offer(
     disk_space: float | None = None,
 ) -> LaunchResult:
     image = _resolve_image(image)
+    before_ids: set[int] = set()
+    existing = manager.list_instances()
+    if isinstance(existing, list):
+        before_ids = {inst.get("id") for inst in existing if inst.get("id")}
+
     response = manager.launch_by_offer_id(
         offer_id=offer_id,
         image=image,
@@ -229,8 +234,29 @@ def launch_offer(
         ssh=True,
     )
 
-    instance_id = response.get("new_contract") or response.get("instance_id")
-    if not instance_id:
+    instance_id: int | None = None
+    if isinstance(response, dict):
+        raw_id = response.get("new_contract") or response.get("instance_id")
+        if raw_id:
+            instance_id = int(raw_id)
+
+    if instance_id is None:
+        # SDK may return None/empty response even if instance was created.
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            instances = manager.list_instances()
+            if isinstance(instances, list):
+                new_ids = [
+                    inst.get("id")
+                    for inst in instances
+                    if inst.get("id") and inst.get("id") not in before_ids
+                ]
+                if new_ids:
+                    instance_id = int(max(new_ids))
+                    break
+            time.sleep(5)
+
+    if instance_id is None:
         raise RuntimeError(f"Failed to launch offer {offer_id}: {response}")
 
     return LaunchResult(instance_id=int(instance_id), offer_id=offer_id, raw_response=response)
