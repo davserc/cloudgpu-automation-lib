@@ -164,7 +164,6 @@ class GPUConfig:
     )
     disk_space: float = DEFAULT_DISK_SPACE
 
-
     @property
     def ssh_command(self) -> str | None:
         """
@@ -265,9 +264,7 @@ class VastGPUManager:
                 self._sdk = VastAI(api_key=self.api_key)
                 logger.debug("VastAI SDK initialized")
             except ImportError as e:
-                raise ImportError(
-                    "vastai-sdk not installed. Run: pip install vastai-sdk"
-                ) from e
+                raise ImportError("vastai-sdk not installed. Run: pip install vastai-sdk") from e
         return self._sdk
 
     def search_gpus(
@@ -637,7 +634,9 @@ class VastGPUManager:
             kwargs["ssh"] = True
 
         logger.info("Launching instance from offer %d with image=%s", offer_id, image)
-        return self.sdk.create_instance(**kwargs)
+        result = self.sdk.create_instance(**kwargs)
+        logger.info("Launch response for offer %d: %s", offer_id, result)
+        return result
 
     def list_instances(self) -> list[dict[str, Any]]:
         """
