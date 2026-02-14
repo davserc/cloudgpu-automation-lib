@@ -15,7 +15,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -502,6 +504,8 @@ class VastGPUManager:
         env_vars: dict[str, str] | None = None,
         jupyter: bool = False,
         ssh: bool = True,
+        fallback_timeout_sec: int = 60,
+        fallback_poll_sec: int = 5,
     ) -> dict[str, Any]:
         """
         Launch a new GPU instance.
@@ -566,7 +570,53 @@ class VastGPUManager:
             kwargs["ssh"] = True
 
         logger.info("Launching instance: gpu=%s, image=%s", gpu_name, image)
-        return self.sdk.launch_instance(**kwargs)
+        before_ids: set[int] = set()
+        existing = self.list_instances()
+        if isinstance(existing, list):
+            before_ids = {inst.get("id") for inst in existing if inst.get("id")}
+
+        result = self.sdk.launch_instance(**kwargs)
+        if isinstance(result, dict):
+            if result.get("new_contract") or result.get("instance_id"):
+                return result
+        else:
+            result = {}
+
+        # Fallback: SDK may return None/empty response even if instance was created.
+        def _parse_instance_time(inst: dict[str, Any]) -> float:
+            for key in ("created_at", "start_date", "start_time"):
+                val = inst.get(key)
+                if isinstance(val, int | float):
+                    return float(val)
+                if isinstance(val, str):
+                    try:
+                        return datetime.fromisoformat(val.replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        continue
+            return 0.0
+
+        deadline = time.time() + fallback_timeout_sec
+        while time.time() < deadline:
+            instances = self.list_instances()
+            if isinstance(instances, list):
+                candidates = [
+                    inst
+                    for inst in instances
+                    if inst.get("id") and inst.get("id") not in before_ids
+                ]
+                if candidates:
+                    candidates.sort(key=_parse_instance_time, reverse=True)
+                    result["instance_id"] = candidates[0]["id"]
+                    result["fallback"] = True
+                    logger.warning(
+                        "launch_instance fallback selected instance_id=%s gpu=%s",
+                        result["instance_id"],
+                        gpu_name,
+                    )
+                    return result
+            time.sleep(fallback_poll_sec)
+
+        return result
 
     def launch_by_offer_id(
         self,
@@ -578,6 +628,8 @@ class VastGPUManager:
         env_vars: dict[str, str] | None = None,
         jupyter: bool = False,
         ssh: bool = True,
+        fallback_timeout_sec: int = 60,
+        fallback_poll_sec: int = 5,
     ) -> dict[str, Any]:
         """
         Launch a new GPU instance by offer ID.
@@ -634,8 +686,60 @@ class VastGPUManager:
             kwargs["ssh"] = True
 
         logger.info("Launching instance from offer %d with image=%s", offer_id, image)
+        before_ids: set[int] = set()
+        existing = self.list_instances()
+        if isinstance(existing, list):
+            before_ids = {inst.get("id") for inst in existing if inst.get("id")}
+
         result = self.sdk.create_instance(**kwargs)
         logger.info("Launch response for offer %d: %s", offer_id, result)
+
+        if isinstance(result, dict):
+            if result.get("new_contract") or result.get("instance_id"):
+                return result
+        else:
+            result = {}
+
+        # Fallback: SDK may return None/empty response even if instance was created.
+        def _parse_instance_time(inst: dict[str, Any]) -> float:
+            for key in ("created_at", "start_date", "start_time"):
+                val = inst.get(key)
+                if isinstance(val, int | float):
+                    return float(val)
+                if isinstance(val, str):
+                    try:
+                        return datetime.fromisoformat(val.replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        continue
+            return 0.0
+
+        deadline = time.time() + fallback_timeout_sec
+        while time.time() < deadline:
+            instances = self.list_instances()
+            if isinstance(instances, list):
+                candidates = [
+                    inst
+                    for inst in instances
+                    if inst.get("id") and inst.get("id") not in before_ids
+                ]
+                if candidates:
+                    matched = [c for c in candidates if c.get("offer_id") == offer_id]
+                    if matched:
+                        result["instance_id"] = matched[0]["id"]
+                        result["fallback"] = True
+                        return result
+
+                    candidates.sort(key=_parse_instance_time, reverse=True)
+                    result["instance_id"] = candidates[0]["id"]
+                    result["fallback"] = True
+                    logger.warning(
+                        "launch_by_offer_id fallback selected instance_id=%s offer_id=%s",
+                        result["instance_id"],
+                        offer_id,
+                    )
+                    return result
+            time.sleep(fallback_poll_sec)
+
         return result
 
     def list_instances(self) -> list[dict[str, Any]]:
