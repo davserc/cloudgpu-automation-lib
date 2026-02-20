@@ -677,6 +677,9 @@ def train_with_cheapest_instance(
     destroy_backoff_sec: float = 5.0,
     offer_blacklist_path: str | Path = ".vast_offer_blacklist.json",
     offer_blacklist_ttl_sec: int = 3600,
+    ensure_yolo_weights: bool = True,
+    yolo_weights_name: str = "yolo11s.pt",
+    ensure_ultralytics: bool = True,
 ) -> LaunchResult:
     """
     End-to-end workflow:
@@ -838,6 +841,17 @@ def train_with_cheapest_instance(
                     backoff_sec=5.0,
                     job_id=job_id,
                 )
+        if ensure_ultralytics and yolo_weights_name in run_cmd:
+            install_ultralytics_cmd = "python3 -m pip install -U ultralytics"
+            logger.info("ultralytics_install job_id=%s cmd=%s", job_id, install_ultralytics_cmd)
+            run_with_retries(
+                manager,
+                launch.instance_id,
+                install_ultralytics_cmd,
+                retries=2,
+                backoff_sec=10.0,
+                job_id=job_id,
+            )
         verify_yolo_cmd = "command -v yolo && yolo --version"
         logger.info("yolo_verify job_id=%s cmd=%s", job_id, verify_yolo_cmd)
         run_with_retries(
@@ -848,8 +862,8 @@ def train_with_cheapest_instance(
             backoff_sec=5.0,
             job_id=job_id,
         )
-        if "yolo11s.pt" in run_cmd:
-            weights_cmd = "ls -la yolo11s.pt || true"
+        if yolo_weights_name in run_cmd:
+            weights_cmd = f"ls -la {yolo_weights_name} || true"
             logger.info("weights_verify job_id=%s cmd=%s", job_id, weights_cmd)
             run_with_retries(
                 manager,
@@ -859,6 +873,19 @@ def train_with_cheapest_instance(
                 backoff_sec=5.0,
                 job_id=job_id,
             )
+            if ensure_yolo_weights:
+                ensure_weights_cmd = (
+                    f"test -s {yolo_weights_name} || " f"yolo download model={yolo_weights_name}"
+                )
+                logger.info("weights_download job_id=%s cmd=%s", job_id, ensure_weights_cmd)
+                run_with_retries(
+                    manager,
+                    launch.instance_id,
+                    ensure_weights_cmd,
+                    retries=2,
+                    backoff_sec=5.0,
+                    job_id=job_id,
+                )
         try:
             if log_path is None:
                 exit_code = run_with_retries(
