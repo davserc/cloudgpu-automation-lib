@@ -16,3 +16,6 @@ dependencies = [
 [tool.setuptools]
 py-modules = ["vast_service", "vast_gpu_manager"]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["services*"]
