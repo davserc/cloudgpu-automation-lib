@@ -746,6 +746,7 @@ def train_with_cheapest_instance(
         env_vars_cmd.update(train_env)
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars_cmd.items())
     run_cmd_with_dataset = f"{env_prefix} {run_cmd}"
+    logger.info("train_command job_id=%s cmd=%s", job_id, run_cmd_with_dataset)
 
     exit_code: int | None = None
     try:
@@ -772,12 +773,48 @@ def train_with_cheapest_instance(
                 cmds.append(extract_cmd.format(archive=archive_path, dst=dataset_dst))
             elif archive_name.endswith(".tar.gz") or archive_name.endswith(".tgz"):
                 cmds.append(f"tar -xzf {archive_path} -C {dataset_dst}")
+            logger.info("dataset_prepare job_id=%s cmd=%s", job_id, " && ".join(cmds))
             run_with_retries(
                 manager,
                 launch.instance_id,
                 " && ".join(cmds),
                 retries=cmd_retries,
                 backoff_sec=cmd_backoff_sec,
+                job_id=job_id,
+            )
+            if dataset_dst:
+                verify_cmd = (
+                    f"ls -la {dataset_dst} && "
+                    "find /work/datasets -maxdepth 3 -type f -name '*.yaml' | head -n 20"
+                )
+                logger.info("dataset_verify job_id=%s cmd=%s", job_id, verify_cmd)
+                run_with_retries(
+                    manager,
+                    launch.instance_id,
+                    verify_cmd,
+                    retries=3,
+                    backoff_sec=5.0,
+                    job_id=job_id,
+                )
+        verify_yolo_cmd = "command -v yolo && yolo --version"
+        logger.info("yolo_verify job_id=%s cmd=%s", job_id, verify_yolo_cmd)
+        run_with_retries(
+            manager,
+            launch.instance_id,
+            verify_yolo_cmd,
+            retries=2,
+            backoff_sec=5.0,
+            job_id=job_id,
+        )
+        if "yolo11s.pt" in run_cmd:
+            weights_cmd = "ls -la yolo11s.pt || true"
+            logger.info("weights_verify job_id=%s cmd=%s", job_id, weights_cmd)
+            run_with_retries(
+                manager,
+                launch.instance_id,
+                weights_cmd,
+                retries=2,
+                backoff_sec=5.0,
                 job_id=job_id,
             )
         try:
