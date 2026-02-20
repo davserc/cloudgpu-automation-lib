@@ -74,6 +74,94 @@ def _format_offer_line(offer: dict[str, Any]) -> str:
     )
 
 
+def _resolve_min_cuda(min_cuda: float | None) -> float | None:
+    if min_cuda is not None:
+        return min_cuda
+    env_min_cuda = os.environ.get("MIN_CUDA")
+    if not env_min_cuda:
+        return None
+    try:
+        return float(env_min_cuda)
+    except ValueError:
+        logger.warning("Invalid MIN_CUDA value %r; ignoring", env_min_cuda)
+        return None
+
+
+def _build_onstart_cmd(
+    gcp_sa_b64: str | None, install_gsutil: bool
+) -> tuple[dict[str, str] | None, str | None]:
+    if not gcp_sa_b64:
+        return None, None
+    env_vars = {"GCP_SA_B64": gcp_sa_b64}
+    onstart_parts = []
+    if install_gsutil:
+        onstart_parts.append("apt-get update && apt-get install -y google-cloud-cli")
+    onstart_parts.append("printf %s \"$GCP_SA_B64\" | tr -d '\\r' | base64 -d > /root/gcp.json")
+    onstart_parts.append("chmod 600 /root/gcp.json")
+    return env_vars, " && ".join(onstart_parts)
+
+
+def _log_selected_offer(
+    offer: dict[str, Any], job_id: str | None, attempt: int, max_attempts: int
+) -> None:
+    logger.info("Selected offer:")
+    logger.info("%s", _format_offer_header())
+    logger.info("%s", "-" * 90)
+    logger.info("%s", _format_offer_line(offer))
+    logger.info(
+        "launching offer_id=%s job_id=%s attempt=%s/%s",
+        offer.get("id"),
+        job_id,
+        attempt,
+        max_attempts,
+    )
+
+
+def _build_train_command(
+    train_dataset_url: str,
+    gcp_sa_b64: str | None,
+    train_env: dict[str, str] | None,
+    run_cmd: str,
+) -> str:
+    env_vars_cmd: dict[str, str] = {"TRAIN_DATASET_URL": train_dataset_url}
+    if gcp_sa_b64:
+        env_vars_cmd["GOOGLE_APPLICATION_CREDENTIALS"] = "/root/gcp.json"
+    if train_env:
+        env_vars_cmd.update(train_env)
+    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars_cmd.items())
+    return f"{env_prefix} {run_cmd}"
+
+
+def _build_dataset_cmds(
+    dataset_gs_uri: str,
+    dataset_dst: str,
+    dataset_archive_name: str | None,
+    extract_cmd: str | None,
+    gcp_sa_b64: str | None,
+) -> tuple[str, str]:
+    archive_name = dataset_archive_name or dataset_gs_uri.rstrip("/").split("/")[-1]
+    archive_path = f"{dataset_dst.rstrip('/')}/{archive_name}"
+    cmds: list[str] = [f"mkdir -p {dataset_dst}"]
+    if gcp_sa_b64:
+        cmds.append("test -s /root/gcp.json")
+        cmds.append(
+            "GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json "
+            "gcloud auth activate-service-account --key-file /root/gcp.json "
+            "2>/dev/null || true"
+        )
+        cmds.append(
+            "GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json "
+            f"gsutil -m cp {dataset_gs_uri} {archive_path}"
+        )
+    else:
+        cmds.append(f"gsutil -m cp {dataset_gs_uri} {archive_path}")
+    if extract_cmd:
+        cmds.append(extract_cmd.format(archive=archive_path, dst=dataset_dst))
+    elif archive_name.endswith(".tar.gz") or archive_name.endswith(".tgz"):
+        cmds.append(f"tar -xzf {archive_path} -C {dataset_dst}")
+    return " && ".join(cmds), archive_path
+
+
 def _load_offer_blacklist(path: str | Path) -> dict[str, Any]:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -606,29 +694,12 @@ def train_with_cheapest_instance(
     tried_offer_ids: set[int] = set()
     stale_instance_ids: list[int] = []
 
-    if min_cuda is None:
-        env_min_cuda = os.environ.get("MIN_CUDA")
-        if env_min_cuda:
-            try:
-                min_cuda = float(env_min_cuda)
-            except ValueError:
-                logger.warning("Invalid MIN_CUDA value %r; ignoring", env_min_cuda)
-                min_cuda = None
+    min_cuda = _resolve_min_cuda(min_cuda)
 
     if gcp_sa_b64 is None:
         gcp_sa_b64 = os.environ.get("GCP_SA_B64")
 
-    env_vars = None
-    onstart_cmd = None
-
-    if gcp_sa_b64:
-        env_vars = {"GCP_SA_B64": gcp_sa_b64}
-        onstart_parts = []
-        if install_gsutil:
-            onstart_parts.append("apt-get update && apt-get install -y google-cloud-cli")
-        onstart_parts.append("printf %s \"$GCP_SA_B64\" | tr -d '\\r' | base64 -d > /root/gcp.json")
-        onstart_parts.append("chmod 600 /root/gcp.json")
-        onstart_cmd = " && ".join(onstart_parts)
+    env_vars, onstart_cmd = _build_onstart_cmd(gcp_sa_b64, install_gsutil)
 
     launch: LaunchResult | None = None
     last_boot_error: Exception | None = None
@@ -652,17 +723,7 @@ def train_with_cheapest_instance(
             break
 
         attempts += 1
-        logger.info("Selected offer:")
-        logger.info("%s", _format_offer_header())
-        logger.info("%s", "-" * 90)
-        logger.info("%s", _format_offer_line(next_offer))
-        logger.info(
-            "launching offer_id=%s job_id=%s attempt=%s/%s",
-            next_offer.get("id"),
-            job_id,
-            attempts,
-            max_launch_attempts,
-        )
+        _log_selected_offer(next_offer, job_id, attempts, max_launch_attempts)
         try:
             launch = launch_offer(
                 manager,
@@ -739,13 +800,7 @@ def train_with_cheapest_instance(
     if not train_dataset_url:
         raise ValueError("train_dataset_url is required (e.g. gs://bucket/path)")
 
-    env_vars_cmd: dict[str, str] = {"TRAIN_DATASET_URL": train_dataset_url}
-    if gcp_sa_b64:
-        env_vars_cmd["GOOGLE_APPLICATION_CREDENTIALS"] = "/root/gcp.json"
-    if train_env:
-        env_vars_cmd.update(train_env)
-    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars_cmd.items())
-    run_cmd_with_dataset = f"{env_prefix} {run_cmd}"
+    run_cmd_with_dataset = _build_train_command(train_dataset_url, gcp_sa_b64, train_env, run_cmd)
     logger.info("train_command job_id=%s cmd=%s", job_id, run_cmd_with_dataset)
 
     exit_code: int | None = None
@@ -753,31 +808,18 @@ def train_with_cheapest_instance(
         if dataset_gs_uri:
             if not gcp_sa_b64:
                 raise ValueError("gcp_sa_b64 is required when dataset_gs_uri is provided")
-            archive_name = dataset_archive_name or dataset_gs_uri.rstrip("/").split("/")[-1]
-            archive_path = f"{dataset_dst.rstrip('/')}/{archive_name}"
-            cmds: list[str] = [f"mkdir -p {dataset_dst}"]
-            if gcp_sa_b64:
-                cmds.append("test -s /root/gcp.json")
-                cmds.append(
-                    "GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json "
-                    "gcloud auth activate-service-account --key-file /root/gcp.json "
-                    "2>/dev/null || true"
-                )
-                cmds.append(
-                    "GOOGLE_APPLICATION_CREDENTIALS=/root/gcp.json "
-                    f"gsutil -m cp {dataset_gs_uri} {archive_path}"
-                )
-            else:
-                cmds.append(f"gsutil -m cp {dataset_gs_uri} {archive_path}")
-            if extract_cmd:
-                cmds.append(extract_cmd.format(archive=archive_path, dst=dataset_dst))
-            elif archive_name.endswith(".tar.gz") or archive_name.endswith(".tgz"):
-                cmds.append(f"tar -xzf {archive_path} -C {dataset_dst}")
-            logger.info("dataset_prepare job_id=%s cmd=%s", job_id, " && ".join(cmds))
+            cmd_str, _ = _build_dataset_cmds(
+                dataset_gs_uri,
+                dataset_dst,
+                dataset_archive_name,
+                extract_cmd,
+                gcp_sa_b64,
+            )
+            logger.info("dataset_prepare job_id=%s cmd=%s", job_id, cmd_str)
             run_with_retries(
                 manager,
                 launch.instance_id,
-                " && ".join(cmds),
+                cmd_str,
                 retries=cmd_retries,
                 backoff_sec=cmd_backoff_sec,
                 job_id=job_id,
