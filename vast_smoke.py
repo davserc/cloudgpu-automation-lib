@@ -1,4 +1,4 @@
-from vast_service import train_with_cheapest_instance
+from services.vast.service import train_with_cheapest_instance
 
 result = train_with_cheapest_instance(
     api_key=None,
