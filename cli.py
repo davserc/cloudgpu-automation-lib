@@ -10,7 +10,7 @@ import json
 import sys
 import time
 
-from vast_gpu_manager import DOCKER_IMAGES, VastGPUManager
+from services.vast.gpu_manager import DOCKER_IMAGES, VastGPUManager
 
 
 def get_manager(api_key: str | None = None) -> VastGPUManager:

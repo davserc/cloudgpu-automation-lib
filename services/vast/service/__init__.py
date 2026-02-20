@@ -1,13 +1,4 @@
-"""
-Vast.ai service automation helpers.
-
-Facade module: public API remains here, implementation is split across
-smaller modules for maintainability.
-"""
-
 from __future__ import annotations
-
-import logging
 
 from services.vast.gpu_manager import DOCKER_IMAGES, VastGPUManager
 from services.vast.service.dataset import (
@@ -47,8 +38,6 @@ from services.vast.service.workflow import (
     launch_offer,
     train_with_cheapest_instance,
 )
-
-logger = logging.getLogger("vast_service")
 
 __all__ = [
     "DOCKER_IMAGES",
