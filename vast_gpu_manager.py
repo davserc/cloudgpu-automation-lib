@@ -45,7 +45,7 @@ DEFAULT_NUM_GPUS = 1
 DEFAULT_MAX_PRICE = 0.50
 DEFAULT_MIN_RELIABILITY = 0.95
 DEFAULT_DOCKER_IMAGE = "davse/flask-yolo-service:latest"
-DEFAULT_DISK_SPACE = 20.0
+DEFAULT_DISK_SPACE = 40.0
 
 # Common Docker images for ML/AI workloads
 # vastai/* images are pre-cached and start faster
