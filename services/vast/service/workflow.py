@@ -32,6 +32,7 @@ from services.vast.service.ssh import (
     run_and_capture,
     run_and_get_output,
     run_with_retries,
+    ssh_base_args,
     wait_for_ssh,
 )
 from services.vast.service.types import LaunchResult
@@ -239,10 +240,7 @@ def _ensure_remote_gcp_json(
             "scp",
             "-P",
             str(port),
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
+            *ssh_base_args(),
             temp_path,
             f"root@{host}:/root/gcp.json",
         ]
