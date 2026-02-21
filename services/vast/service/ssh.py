@@ -10,6 +10,27 @@ from services.vast.gpu_manager import VastGPUManager
 
 logger = logging.getLogger("vast_service")
 
+SSH_CONNECT_TIMEOUT_SEC = 10
+SSH_SERVER_ALIVE_INTERVAL_SEC = 30
+SSH_SERVER_ALIVE_COUNT_MAX = 5
+
+
+def ssh_base_args() -> list[str]:
+    return [
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        f"ConnectTimeout={SSH_CONNECT_TIMEOUT_SEC}",
+        "-o",
+        f"ServerAliveInterval={SSH_SERVER_ALIVE_INTERVAL_SEC}",
+        "-o",
+        f"ServerAliveCountMax={SSH_SERVER_ALIVE_COUNT_MAX}",
+        "-o",
+        "TCPKeepAlive=yes",
+    ]
+
 
 def _get_ssh_info(manager: VastGPUManager, instance_id: int) -> tuple[str, int] | None:
     instance = manager.get_instance(instance_id)
@@ -61,10 +82,7 @@ def download(
         scp_bin,
         "-P",
         str(port),
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
+        *ssh_base_args(),
         "-r",
         f"root@{host}:{src}",
         dst_path,
@@ -92,10 +110,7 @@ def run(
         ssh_bin,
         "-p",
         str(port),
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
+        *ssh_base_args(),
         f"root@{host}",
         cmd,
     ]
@@ -152,10 +167,7 @@ def run_and_capture(
         ssh_bin,
         "-p",
         str(port),
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
+        *ssh_base_args(),
         f"root@{host}",
         cmd,
     ]
@@ -189,10 +201,7 @@ def run_and_get_output(
         ssh_bin,
         "-p",
         str(port),
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
+        *ssh_base_args(),
         f"root@{host}",
         cmd,
     ]
