@@ -402,6 +402,7 @@ def train_with_cheapest_instance(
     ensure_yolo_weights: bool = True,
     yolo_weights_name: str = "yolo11s.pt",
     ensure_ultralytics: bool = True,
+    ensure_polars_rtcompat: bool = True,
     detach_train: bool = True,
     remote_train_log: str = "/work/train.log",
     remote_train_pid: str = "/work/train.pid",
@@ -617,6 +618,17 @@ def train_with_cheapest_instance(
                 manager,
                 launch.instance_id,
                 install_ultralytics_cmd,
+                retries=2,
+                backoff_sec=10.0,
+                job_id=job_id,
+            )
+        if ensure_polars_rtcompat:
+            install_polars_cmd = "python3 -m pip install -U 'polars[rtcompat]'"
+            logger.info("polars_rtcompat_install job_id=%s cmd=%s", job_id, install_polars_cmd)
+            run_with_retries(
+                manager,
+                launch.instance_id,
+                install_polars_cmd,
                 retries=2,
                 backoff_sec=10.0,
                 job_id=job_id,
