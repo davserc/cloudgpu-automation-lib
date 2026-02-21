@@ -17,6 +17,11 @@ def _build_onstart_cmd(
         onstart_parts.append("apt-get update && apt-get install -y google-cloud-cli")
     onstart_parts.append("printf %s \"$GCP_SA_B64\" | tr -d '\\r' | base64 -d > /root/gcp.json")
     onstart_parts.append("chmod 600 /root/gcp.json")
+    onstart_parts.append(
+        "test -s /root/gcp.json && echo 'gcp.json: present' || echo 'gcp.json: missing'"
+    )
+    onstart_parts.append("gcloud auth list || true")
+    onstart_parts.append("gsutil ls gs://unlu-genai-serranodavid-computer_vision_yolo || true")
     return env_vars, " && ".join(onstart_parts)
 
 
