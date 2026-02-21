@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import shlex
 import subprocess
 import tempfile
 import time
@@ -38,6 +39,8 @@ from services.vast.service.ssh import (
 from services.vast.service.types import LaunchResult
 
 logger = logging.getLogger("vast_service")
+
+SSH_TRANSPORT_EXIT_CODE = 255
 
 
 def _resolve_image(image: str) -> str:
@@ -282,6 +285,85 @@ def _ensure_remote_gcp_json(
                 pass
 
 
+def _retry_on_ssh_transport_error(
+    fn,
+    *args,
+    retries: int = 5,
+    backoff_sec: float = 5.0,
+    **kwargs,
+):
+    for attempt in range(1, retries + 1):
+        try:
+            return fn(*args, **kwargs)
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode == SSH_TRANSPORT_EXIT_CODE and attempt < retries:
+                time.sleep(backoff_sec * attempt)
+                continue
+            raise
+
+
+def _start_training_detached(
+    manager: VastGPUManager,
+    instance_id: int,
+    cmd: str,
+    remote_log_path: str,
+    remote_pid_path: str,
+    remote_exit_path: str,
+    job_id: str | None = None,
+    retries: int = 5,
+    backoff_sec: float = 5.0,
+) -> None:
+    log_q = shlex.quote(remote_log_path)
+    pid_q = shlex.quote(remote_pid_path)
+    exit_q = shlex.quote(remote_exit_path)
+    script = f"{cmd}; echo $? > {exit_q}"
+    start_cmd = (
+        "nohup sh -lc " f"{shlex.quote(script)}" f" > {log_q} 2>&1 < /dev/null & echo $! > {pid_q}"
+    )
+    _retry_on_ssh_transport_error(
+        run_with_retries,
+        manager,
+        instance_id,
+        start_cmd,
+        retries=retries,
+        backoff_sec=backoff_sec,
+        job_id=job_id,
+    )
+
+
+def _poll_training_status(
+    manager: VastGPUManager,
+    instance_id: int,
+    remote_pid_path: str,
+    remote_exit_path: str,
+    job_id: str | None = None,
+    retries: int = 5,
+    backoff_sec: float = 5.0,
+) -> str:
+    pid_q = shlex.quote(remote_pid_path)
+    exit_q = shlex.quote(remote_exit_path)
+    status_cmd = (
+        f"if test -s {pid_q}; then "
+        f"pid=$(cat {pid_q}); "
+        'if ps -p "$pid" > /dev/null 2>&1; then '
+        "echo RUNNING; "
+        "else "
+        f"if test -s {exit_q}; then echo EXIT:$(cat {exit_q}); "
+        "else echo EXIT:unknown; fi; "
+        "fi; "
+        "else echo MISSING; fi"
+    )
+    return _retry_on_ssh_transport_error(
+        run_and_get_output,
+        manager,
+        instance_id,
+        status_cmd,
+        retries=retries,
+        backoff_sec=backoff_sec,
+        job_id=job_id,
+    ).strip()
+
+
 def train_with_cheapest_instance(
     api_key: str | None,
     *,
@@ -320,6 +402,13 @@ def train_with_cheapest_instance(
     ensure_yolo_weights: bool = True,
     yolo_weights_name: str = "yolo11s.pt",
     ensure_ultralytics: bool = True,
+    detach_train: bool = True,
+    remote_train_log: str = "/work/train.log",
+    remote_train_pid: str = "/work/train.pid",
+    remote_train_exit: str = "/work/train.exit",
+    train_poll_interval_sec: int = 15,
+    ssh_transport_retries: int = 5,
+    ssh_transport_backoff_sec: float = 5.0,
 ) -> LaunchResult:
     """
     End-to-end workflow:
@@ -570,23 +659,74 @@ def train_with_cheapest_instance(
                     job_id=job_id,
                 )
         try:
-            if log_path is None:
-                exit_code = run_with_retries(
+            if detach_train:
+                logger.info(
+                    "train_detached job_id=%s log=%s pid=%s exit=%s",
+                    job_id,
+                    remote_train_log,
+                    remote_train_pid,
+                    remote_train_exit,
+                )
+                _start_training_detached(
                     manager,
                     launch.instance_id,
                     run_cmd_with_dataset,
-                    retries=cmd_retries,
-                    backoff_sec=cmd_backoff_sec,
+                    remote_train_log,
+                    remote_train_pid,
+                    remote_train_exit,
                     job_id=job_id,
+                    retries=ssh_transport_retries,
+                    backoff_sec=ssh_transport_backoff_sec,
                 )
+                while True:
+                    status = _poll_training_status(
+                        manager,
+                        launch.instance_id,
+                        remote_train_pid,
+                        remote_train_exit,
+                        job_id=job_id,
+                        retries=ssh_transport_retries,
+                        backoff_sec=ssh_transport_backoff_sec,
+                    )
+                    if status == "RUNNING":
+                        time.sleep(train_poll_interval_sec)
+                        continue
+                    if status.startswith("EXIT:"):
+                        code_str = status.split(":", 1)[1]
+                        try:
+                            exit_code = int(code_str)
+                        except ValueError:
+                            exit_code = 1
+                        break
+                    # MISSING o EXIT:unknown
+                    exit_code = 1
+                    break
+                if log_path is not None:
+                    download(
+                        manager,
+                        launch.instance_id,
+                        remote_train_log,
+                        log_path,
+                        job_id=job_id,
+                    )
             else:
-                exit_code = run_and_capture(
-                    manager,
-                    launch.instance_id,
-                    run_cmd_with_dataset,
-                    log_path,
-                    job_id=job_id,
-                )
+                if log_path is None:
+                    exit_code = run_with_retries(
+                        manager,
+                        launch.instance_id,
+                        run_cmd_with_dataset,
+                        retries=cmd_retries,
+                        backoff_sec=cmd_backoff_sec,
+                        job_id=job_id,
+                    )
+                else:
+                    exit_code = run_and_capture(
+                        manager,
+                        launch.instance_id,
+                        run_cmd_with_dataset,
+                        log_path,
+                        job_id=job_id,
+                    )
         except subprocess.CalledProcessError as exc:
             exit_code = exc.returncode
             if raise_on_nonzero:
