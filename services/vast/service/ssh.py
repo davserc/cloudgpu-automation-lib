@@ -220,7 +220,7 @@ def _ensure_min_free_space(
     job_id: str | None = None,
 ) -> bool:
     path_q = shlex.quote(path)
-    cmd = f"df -Pk {path_q} | tail -n 1"
+    cmd = f"mkdir -p {path_q} && df -Pk {path_q} | tail -n 1"
     out = run_and_get_output(manager, instance_id, cmd, job_id=job_id).strip()
     if not out:
         logger.warning("disk_check empty output path=%s job_id=%s", path, job_id)
