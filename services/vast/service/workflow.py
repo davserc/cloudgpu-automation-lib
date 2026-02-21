@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import subprocess
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +30,7 @@ from services.vast.service.ssh import (
     _ensure_min_free_space,
     download,
     run_and_capture,
+    run_and_get_output,
     run_with_retries,
     wait_for_ssh,
 )
@@ -199,6 +202,88 @@ def destroy_with_retries(
         raise last_error
 
 
+def _ensure_remote_gcp_json(
+    manager: VastGPUManager,
+    instance_id: int,
+    gcp_sa_b64: str,
+    job_id: str | None = None,
+) -> None:
+    """Ensure /root/gcp.json exists on the instance; fallback to SCP if missing."""
+    try:
+        decoded = base64.b64decode(gcp_sa_b64, validate=True)
+    except Exception as exc:  # noqa: BLE001 - surface invalid secrets early
+        logger.warning("Invalid GCP_SA_B64; cannot create /root/gcp.json (%s)", exc)
+        return
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(decoded)
+            temp_path = tmp.name
+        os.chmod(temp_path, 0o600)
+
+        try:
+            out = run_and_get_output(
+                manager,
+                instance_id,
+                "test -s /root/gcp.json && echo present || echo missing",
+                job_id=job_id,
+            ).strip()
+            if "present" in out:
+                return
+        except subprocess.CalledProcessError:
+            pass
+
+        host, port = wait_for_ssh(manager, instance_id, job_id=job_id)
+        scp_cmd = [
+            "scp",
+            "-P",
+            str(port),
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            temp_path,
+            f"root@{host}:/root/gcp.json",
+        ]
+        logger.info(
+            "gcp.json missing on instance %s; uploading via scp (host=%s port=%s)",
+            instance_id,
+            host,
+            port,
+        )
+        try:
+            result = subprocess.run(scp_cmd, check=True, capture_output=True, text=True)
+            if result.stdout:
+                logger.info("gcp.json scp stdout:\n%s", result.stdout)
+            if result.stderr:
+                logger.warning("gcp.json scp stderr:\n%s", result.stderr)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Failed to upload /root/gcp.json via scp for instance {instance_id}"
+            ) from exc
+
+        try:
+            out = run_and_get_output(
+                manager,
+                instance_id,
+                "test -s /root/gcp.json && echo present || echo missing",
+                job_id=job_id,
+            ).strip()
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Failed to verify /root/gcp.json after scp for instance {instance_id}"
+            ) from exc
+        if "present" not in out:
+            raise RuntimeError(f"/root/gcp.json still missing after scp for instance {instance_id}")
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
 def train_with_cheapest_instance(
     api_key: str | None,
     *,
@@ -314,6 +399,8 @@ def train_with_cheapest_instance(
                 poll_interval_sec=ssh_poll_interval_sec,
                 job_id=job_id,
             )
+            if gcp_sa_b64:
+                _ensure_remote_gcp_json(manager, launch.instance_id, gcp_sa_b64, job_id=job_id)
             if min_free_disk_gb > 0:
                 if not _ensure_min_free_space(
                     manager,
