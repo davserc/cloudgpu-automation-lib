@@ -5,7 +5,7 @@ import os
 
 logger = logging.getLogger("vast_service")
 
-MIN_FREE_DISK_GB_DEFAULT = 30.0
+MIN_FREE_DISK_GB_DEFAULT = 6.0
 
 
 def _resolve_min_cuda(min_cuda: float | None) -> float | None:
