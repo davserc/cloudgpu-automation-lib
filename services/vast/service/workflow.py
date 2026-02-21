@@ -557,7 +557,10 @@ def train_with_cheapest_instance(
             )
             if ensure_yolo_weights:
                 ensure_weights_cmd = (
-                    f"test -s {yolo_weights_name} || " f"yolo download model={yolo_weights_name}"
+                    f"test -s {yolo_weights_name} || "
+                    'python3 -c "from ultralytics.utils.downloads import '
+                    "attempt_download_asset; attempt_download_asset("
+                    f"'{yolo_weights_name}')\""
                 )
                 logger.info("weights_download job_id=%s cmd=%s", job_id, ensure_weights_cmd)
                 run_with_retries(
