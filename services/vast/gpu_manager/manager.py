@@ -707,6 +707,17 @@ class VastGPUManager:
             Dictionary with credit, total_spend, and other user info.
         """
         user = self.sdk.show_user()
+        if isinstance(user, str):
+            try:
+                import json
+
+                user = json.loads(user)
+            except Exception:  # noqa: BLE001
+                logger.warning("show_user returned non-JSON string: %r", user)
+                user = {}
+        if not isinstance(user, dict):
+            logger.warning("show_user returned unexpected type: %s", type(user).__name__)
+            user = {}
         return {
             "credit": user.get("credit", 0),
             "total_spend": abs(user.get("total_spend", 0)),
