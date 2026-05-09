@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -57,18 +58,6 @@ class GPUConfig:
             get_env_float("DEFAULT_DISK_SPACE", DEFAULT_DISK_SPACE), MIN_DISK_SPACE
         )
     )
-
-    @property
-    def ssh_command(self) -> str | None:
-        """
-        Get SSH command to connect to this instance.
-
-        Returns:
-            SSH command string or None if SSH not available.
-        """
-        if self.ssh_host and self.ssh_port:
-            return f"ssh -p {self.ssh_port} root@{self.ssh_host}"
-        return None
 
 
 class VastGPUManager:
@@ -750,8 +739,39 @@ class VastGPUManager:
         Returns:
             API response dictionary.
         """
+        import json
+        from urllib import error, request
+
         logger.info("Adding SSH key")
-        return self.sdk.create_ssh_key(ssh_key=public_key)
+        url = "https://console.vast.ai/api/v0/ssh/"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"ssh_key": public_key}
+        data = json.dumps(payload).encode("utf-8")
+        req = request.Request(url=url, data=data, headers=headers, method="POST")
+
+        try:
+            with request.urlopen(req, timeout=30) as response:
+                body = response.read().decode("utf-8").strip()
+                if not body:
+                    return {}
+                return json.loads(body)
+        except error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace").strip()
+            if e.code == 400 and err_body:
+                try:
+                    err_json = json.loads(err_body)
+                    if err_json.get("error") == "duplicate":
+                        logger.info("SSH key already exists on account")
+                        return {"success": True, "duplicate": True, "msg": err_json.get("msg")}
+                except json.JSONDecodeError:
+                    pass
+            detail = err_body or e.reason
+            raise RuntimeError(f"{e.code} {e.reason}: {detail}") from e
+        except error.URLError as e:
+            raise RuntimeError(f"Network error uploading SSH key: {e.reason}") from e
 
     def list_ssh_keys(self) -> list[dict[str, Any]]:
         """
@@ -778,7 +798,7 @@ class VastGPUManager:
             host = instance.get("ssh_host")
             port = instance.get("ssh_port")
             if host and port:
-                return f"ssh -p {port} root@{host}"
+                return f"ssh -p {port} {os.getenv('VAST_SSH_USER', 'vast')}@{host}"
         return None
 
 

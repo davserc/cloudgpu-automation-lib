@@ -49,6 +49,17 @@ cp .env.example .env
 make ssh-setup
 ```
 
+## Secrets and environment
+
+- The library reads the Vast API key from environment in this order:
+  1. Explicit CLI flag `--api-key`
+  2. `VASTAI_API_KEY`
+  3. `VAST_API_KEY` (fallback for compatibility)
+- SSH hardening env vars:
+  - `VAST_SSH_USER` (default: `vast`)
+  - `VAST_SSH_KNOWN_HOSTS_FILE` (default: `/root/.ssh/known_hosts`)
+- Do not commit real `.env` files. Keep only `.env.example` in git.
+
 ## Usage
 
 ### Search GPUs

@@ -10,8 +10,18 @@ logger = logging.getLogger("vast_gpu_manager")
 try:
     from dotenv import load_dotenv
 
-    _env_path = Path(__file__).parent / ".env"
-    if _env_path.exists():
+    _env_path = None
+    _search = Path(__file__).resolve().parent
+    for _ in range(6):
+        _candidate = _search / ".env"
+        if _candidate.exists():
+            _env_path = _candidate
+            break
+        _parent = _search.parent
+        if _parent == _search:
+            break
+        _search = _parent
+    if _env_path:
         load_dotenv(_env_path)
         logger.debug("Loaded environment from %s", _env_path)
 except ImportError:

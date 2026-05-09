@@ -49,7 +49,7 @@ echo "   python cli.py destroy <instance_id>"
 echo ""
 
 echo "5. CONNECT via SSH"
-echo "   ssh -i keys/vast_gpu -p <port> root@<host>"
+echo "   ssh -i keys/vast_gpu -p <port> vast@<host>"
 echo ""
 echo "   # Or use the ssh command from 'python cli.py ssh <id>'"
 echo ""

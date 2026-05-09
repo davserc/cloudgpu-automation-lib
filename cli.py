@@ -7,17 +7,27 @@ Command-line interface for managing GPU instances on Vast.ai
 
 import argparse
 import json
+import os
 import sys
 import time
 
 from services.vast.gpu_manager import DOCKER_IMAGES, VastGPUManager
+from services.vast.gpu_manager.errors import APIKeyError
+
+
+def ssh_user() -> str:
+    return os.getenv("VAST_SSH_USER", "vast")
+
+
+def known_hosts_file() -> str:
+    return os.getenv("VAST_SSH_KNOWN_HOSTS_FILE", "~/.ssh/known_hosts")
 
 
 def get_manager(api_key: str | None = None) -> VastGPUManager:
     """Get manager instance, with error handling"""
     try:
         return VastGPUManager(api_key=api_key)
-    except ValueError as e:
+    except (ValueError, APIKeyError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -173,7 +183,7 @@ def cmd_launch(args):
                     host = inst.get("ssh_host")
                     port = inst.get("ssh_port")
                     if host and port:
-                        ssh_commands[inst_id] = f"ssh -p {port} root@{host}"
+                        ssh_commands[inst_id] = f"ssh -p {port} {ssh_user()}@{host}"
             if len(ssh_commands) == len(instance_ids):
                 break
 
@@ -215,7 +225,7 @@ def cmd_launch(args):
                             host = inst.get("ssh_host")
                             port = inst.get("ssh_port")
                             if host and port:
-                                ssh_cmd = f"ssh -p {port} root@{host}"
+                                ssh_cmd = f"ssh -p {port} {ssh_user()}@{host}"
                                 break
                     if ssh_cmd:
                         break
@@ -250,7 +260,7 @@ def cmd_list(args):
         host = inst.get("ssh_host")
         port = inst.get("ssh_port")
         if host and port:
-            ssh_cmd = f"ssh -p {port} root@{host}"
+            ssh_cmd = f"ssh -p {port} {ssh_user()}@{host}"
 
         print(
             f"{inst.get('id') or 'N/A':<12} "
@@ -470,7 +480,7 @@ def cmd_upload(args):
         sys.exit(1)
 
     host, port = ssh_info
-    dst = args.dst or "/root/"
+    dst = args.dst or "/home/vast/"
 
     # Build scp command
     scp_cmd = [
@@ -478,10 +488,12 @@ def cmd_upload(args):
         "-P",
         str(port),
         "-o",
-        "StrictHostKeyChecking=no",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        f"UserKnownHostsFile={known_hosts_file()}",
         "-r",  # recursive
         args.src,
-        f"root@{host}:{dst}",
+        f"{ssh_user()}@{host}:{dst}",
     ]
 
     print(f"Uploading {args.src} -> {host}:{dst}")
@@ -509,9 +521,11 @@ def cmd_download(args):
         "-P",
         str(port),
         "-o",
-        "StrictHostKeyChecking=no",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        f"UserKnownHostsFile={known_hosts_file()}",
         "-r",  # recursive
-        f"root@{host}:{args.src}",
+        f"{ssh_user()}@{host}:{args.src}",
         dst,
     ]
 
@@ -539,8 +553,10 @@ def cmd_run(args):
         "-p",
         str(port),
         "-o",
-        "StrictHostKeyChecking=no",
-        f"root@{host}",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        f"UserKnownHostsFile={known_hosts_file()}",
+        f"{ssh_user()}@{host}",
         args.cmd,
     ]
 

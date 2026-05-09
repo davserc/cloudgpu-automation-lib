@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
 import time
@@ -15,12 +16,20 @@ SSH_SERVER_ALIVE_INTERVAL_SEC = 30
 SSH_SERVER_ALIVE_COUNT_MAX = 5
 
 
+def ssh_user() -> str:
+    return os.getenv("VAST_SSH_USER", "vast")
+
+
+def known_hosts_file() -> str:
+    return os.getenv("VAST_SSH_KNOWN_HOSTS_FILE", "/root/.ssh/known_hosts")
+
+
 def ssh_base_args() -> list[str]:
     return [
         "-o",
-        "StrictHostKeyChecking=no",
+        "StrictHostKeyChecking=yes",
         "-o",
-        "UserKnownHostsFile=/dev/null",
+        f"UserKnownHostsFile={known_hosts_file()}",
         "-o",
         f"ConnectTimeout={SSH_CONNECT_TIMEOUT_SEC}",
         "-o",
@@ -84,7 +93,7 @@ def download(
         str(port),
         *ssh_base_args(),
         "-r",
-        f"root@{host}:{src}",
+        f"{ssh_user()}@{host}:{src}",
         dst_path,
     ]
     logger.info(
@@ -111,7 +120,7 @@ def run(
         "-p",
         str(port),
         *ssh_base_args(),
-        f"root@{host}",
+        f"{ssh_user()}@{host}",
         cmd,
     ]
     logger.info(
@@ -168,7 +177,7 @@ def run_and_capture(
         "-p",
         str(port),
         *ssh_base_args(),
-        f"root@{host}",
+        f"{ssh_user()}@{host}",
         cmd,
     ]
     log_file_path = Path(log_path)
@@ -202,7 +211,7 @@ def run_and_get_output(
         "-p",
         str(port),
         *ssh_base_args(),
-        f"root@{host}",
+        f"{ssh_user()}@{host}",
         cmd,
     ]
     logger.info(

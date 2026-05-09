@@ -43,6 +43,14 @@ logger = logging.getLogger("vast_service")
 SSH_TRANSPORT_EXIT_CODE = 255
 
 
+def _remote_ssh_user() -> str:
+    return os.getenv("VAST_SSH_USER", "vast")
+
+
+def _remote_gcp_json_path() -> str:
+    return os.getenv("VAST_REMOTE_GCP_JSON_PATH", f"/home/{_remote_ssh_user()}/gcp.json")
+
+
 def _resolve_image(image: str) -> str:
     return DOCKER_IMAGES.get(image, image)
 
@@ -212,11 +220,11 @@ def _ensure_remote_gcp_json(
     gcp_sa_b64: str,
     job_id: str | None = None,
 ) -> None:
-    """Ensure /root/gcp.json exists on the instance; fallback to SCP if missing."""
+    """Ensure remote gcp.json exists on the instance; fallback to SCP if missing."""
     try:
         decoded = base64.b64decode(gcp_sa_b64, validate=True)
     except Exception as exc:  # noqa: BLE001 - surface invalid secrets early
-        logger.warning("Invalid GCP_SA_B64; cannot create /root/gcp.json (%s)", exc)
+        logger.warning("Invalid GCP_SA_B64; cannot create remote gcp.json (%s)", exc)
         return
 
     temp_path = None
@@ -226,11 +234,12 @@ def _ensure_remote_gcp_json(
             temp_path = tmp.name
         os.chmod(temp_path, 0o600)
 
+        remote_gcp_json = _remote_gcp_json_path()
         try:
             out = run_and_get_output(
                 manager,
                 instance_id,
-                "test -s /root/gcp.json && echo present || echo missing",
+                f"test -s {shlex.quote(remote_gcp_json)} && echo present || echo missing",
                 job_id=job_id,
             ).strip()
             if "present" in out:
@@ -245,7 +254,7 @@ def _ensure_remote_gcp_json(
             str(port),
             *ssh_base_args(),
             temp_path,
-            f"root@{host}:/root/gcp.json",
+            f"{_remote_ssh_user()}@{host}:{remote_gcp_json}",
         ]
         logger.info(
             "gcp.json missing on instance %s; uploading via scp (host=%s port=%s)",
@@ -268,15 +277,15 @@ def _ensure_remote_gcp_json(
             out = run_and_get_output(
                 manager,
                 instance_id,
-                "test -s /root/gcp.json && echo present || echo missing",
+                f"test -s {shlex.quote(remote_gcp_json)} && echo present || echo missing",
                 job_id=job_id,
             ).strip()
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
-                f"Failed to verify /root/gcp.json after scp for instance {instance_id}"
+                f"Failed to verify remote gcp.json after scp for instance {instance_id}"
             ) from exc
         if "present" not in out:
-            raise RuntimeError(f"/root/gcp.json still missing after scp for instance {instance_id}")
+            raise RuntimeError(f"remote gcp.json still missing after scp for instance {instance_id}")
     finally:
         if temp_path:
             try:
