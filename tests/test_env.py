@@ -1,5 +1,5 @@
-import os
 import pytest
+
 from services.vast.gpu_manager.env import get_env, get_env_float, get_env_int
 
 

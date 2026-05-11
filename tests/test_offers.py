@@ -1,13 +1,13 @@
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
 from services.vast.service.offers import (
-    _rank_offers,
-    _is_offer_blacklisted,
     _add_offer_blacklist,
-    _prune_offer_blacklist,
-    _load_offer_blacklist,
-    _format_offer_line,
     _format_offer_header,
+    _format_offer_line,
+    _is_offer_blacklisted,
+    _load_offer_blacklist,
+    _prune_offer_blacklist,
+    _rank_offers,
 )
 
 
@@ -124,6 +124,7 @@ class TestBlacklist:
 
     def test_prune_expired(self):
         import time
+
         bl = {}
         bl = _add_offer_blacklist(bl, 1, ttl_sec=3600)
         bl["offers"]["1"] = time.time() - 1  # already expired

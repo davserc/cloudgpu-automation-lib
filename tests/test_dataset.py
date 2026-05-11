@@ -1,9 +1,9 @@
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from services.vast.service.dataset import (
     _build_dataset_cmds,
-    _build_train_command,
     _build_onstart_cmd,
+    _build_train_command,
     _get_user_access_token,
 )
 
@@ -121,7 +121,9 @@ class TestBuildOnstartCmd:
 
 class TestGetUserAccessToken:
     def test_returns_none_for_service_account_type(self):
-        import base64, json
+        import base64
+        import json
+
         creds = {"type": "service_account", "private_key": "..."}
         b64 = base64.b64encode(json.dumps(creds).encode()).decode()
         assert _get_user_access_token(b64) is None
@@ -130,7 +132,9 @@ class TestGetUserAccessToken:
         assert _get_user_access_token("not-valid-base64!!!") is None
 
     def test_exchanges_token_for_authorized_user(self):
-        import base64, json
+        import base64
+        import json
+
         creds = {
             "type": "authorized_user",
             "client_id": "client-id",
@@ -143,6 +147,8 @@ class TestGetUserAccessToken:
         mock_response.__enter__ = lambda s: s
         mock_response.__exit__ = MagicMock(return_value=False)
 
-        with patch("services.vast.service.dataset.urllib_request.urlopen", return_value=mock_response):
+        with patch(
+            "services.vast.service.dataset.urllib_request.urlopen", return_value=mock_response
+        ):
             token = _get_user_access_token(b64)
         assert token == "ya29.fake"

@@ -88,9 +88,7 @@ def launch_offer(
     instance_id: int | None = None
     if isinstance(response, dict):
         if response.get("success") is False:
-            raise RuntimeError(
-                f"Offer {offer_id} rejected by API (success=False): {response}"
-            )
+            raise RuntimeError(f"Offer {offer_id} rejected by API (success=False): {response}")
         raw_id = response.get("new_contract") or response.get("instance_id")
         if raw_id:
             instance_id = int(raw_id)
@@ -291,7 +289,9 @@ def _ensure_remote_gcp_json(
                 f"Failed to verify remote gcp.json after scp for instance {instance_id}"
             ) from exc
         if "present" not in out:
-            raise RuntimeError(f"remote gcp.json still missing after scp for instance {instance_id}")
+            raise RuntimeError(
+                f"remote gcp.json still missing after scp for instance {instance_id}"
+            )
     finally:
         if temp_path:
             try:
@@ -333,7 +333,7 @@ def _start_training_detached(
     exit_q = shlex.quote(remote_exit_path)
     script = f"{cmd}; echo $? > {exit_q}"
     start_cmd = (
-        "nohup bash -c " f"{shlex.quote(script)}" f" > {log_q} 2>&1 < /dev/null & echo $! > {pid_q}"
+        f"nohup bash -c {shlex.quote(script)} > {log_q} 2>&1 < /dev/null & echo $! > {pid_q}"
     )
     _retry_on_ssh_transport_error(
         run_with_retries,
@@ -601,7 +601,9 @@ def train_with_cheapest_instance(
                 raise ValueError("gcp_sa_b64 is required when dataset_gs_uri is provided")
             access_token = _get_user_access_token(gcp_sa_b64)
             if access_token:
-                logger.info("dataset_prepare: using Bearer token (authorized_user) job_id=%s", job_id)
+                logger.info(
+                    "dataset_prepare: using Bearer token (authorized_user) job_id=%s", job_id
+                )
             cmd_str, _ = _build_dataset_cmds(
                 dataset_gs_uri,
                 dataset_dst,
@@ -647,10 +649,12 @@ def train_with_cheapest_instance(
             if extract_cmd:
                 http_cmds.append(extract_cmd.format(archive=archive_path, dst=dataset_dst))
             elif archive_name.endswith(".tar.gz") or archive_name.endswith(".tgz"):
-                http_cmds.append(f"tar -xzf {shlex.quote(archive_path)} -C {shlex.quote(dataset_dst)}")
+                http_cmds.append(
+                    f"tar -xzf {shlex.quote(archive_path)} -C {shlex.quote(dataset_dst)}"
+                )
             elif archive_name.endswith(".zip"):
                 http_cmds.append(
-                    f"python3 -c \"import zipfile; zipfile.ZipFile({repr(archive_path)}).extractall({repr(dataset_dst)})\""
+                    f'python3 -c "import zipfile; zipfile.ZipFile({repr(archive_path)}).extractall({repr(dataset_dst)})"'
                 )
             http_cmd_str = " && ".join(http_cmds)
             logger.info("dataset_http_download job_id=%s cmd=%s", job_id, http_cmd_str)

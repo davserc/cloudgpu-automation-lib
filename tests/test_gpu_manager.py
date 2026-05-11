@@ -1,17 +1,29 @@
-import pytest
 from unittest.mock import MagicMock, patch
-from services.vast.gpu_manager.errors import APIKeyError, VastAIError, InstanceNotFoundError
-from services.vast.gpu_manager.manager import GPUConfig, VastGPUManager, quick_launch
+
+import pytest
+
 from services.vast.gpu_manager.constants import (
-    DEFAULT_GPU_NAME, DEFAULT_NUM_GPUS, DEFAULT_MAX_PRICE,
-    DEFAULT_MIN_RELIABILITY, DEFAULT_DOCKER_IMAGE, DEFAULT_DISK_SPACE, MIN_DISK_SPACE,
+    DEFAULT_DOCKER_IMAGE,
+    DEFAULT_GPU_NAME,
+    DEFAULT_MAX_PRICE,
+    DEFAULT_MIN_RELIABILITY,
+    DEFAULT_NUM_GPUS,
+    MIN_DISK_SPACE,
 )
+from services.vast.gpu_manager.errors import APIKeyError, InstanceNotFoundError, VastAIError
+from services.vast.gpu_manager.manager import GPUConfig, VastGPUManager, quick_launch
 
 
 class TestGPUConfig:
     def test_default_values(self, monkeypatch):
-        for var in ("DEFAULT_GPU_NAME", "DEFAULT_NUM_GPUS", "DEFAULT_MAX_PRICE",
-                    "DEFAULT_MIN_RELIABILITY", "DEFAULT_DOCKER_IMAGE", "DEFAULT_DISK_SPACE"):
+        for var in (
+            "DEFAULT_GPU_NAME",
+            "DEFAULT_NUM_GPUS",
+            "DEFAULT_MAX_PRICE",
+            "DEFAULT_MIN_RELIABILITY",
+            "DEFAULT_DOCKER_IMAGE",
+            "DEFAULT_DISK_SPACE",
+        ):
             monkeypatch.delenv(var, raising=False)
         cfg = GPUConfig()
         assert cfg.gpu_name == DEFAULT_GPU_NAME
@@ -45,8 +57,15 @@ class TestVastGPUManager:
         mgr = self._manager()
         mock_sdk = MagicMock()
         mock_sdk.search_offers.return_value = [
-            {"id": 1, "gpu_name": "RTX 3080", "dph_total": 0.03, "dlperf": 27.0,
-             "gpu_ram": 10240, "total_flops": 29.0, "reliability": 0.98}
+            {
+                "id": 1,
+                "gpu_name": "RTX 3080",
+                "dph_total": 0.03,
+                "dlperf": 27.0,
+                "gpu_ram": 10240,
+                "total_flops": 29.0,
+                "reliability": 0.98,
+            }
         ]
         mgr._sdk = mock_sdk
         results = mgr.search_gpus(max_price=0.05, limit=10)
@@ -57,10 +76,24 @@ class TestVastGPUManager:
         mgr = self._manager()
         mock_sdk = MagicMock()
         mock_sdk.search_offers.return_value = [
-            {"id": 1, "gpu_name": "RTX 3080", "dph_total": 0.03, "dlperf": 27.0,
-             "gpu_ram": 10240, "total_flops": 29.0, "reliability": 0.98},
-            {"id": 2, "gpu_name": "Tesla V100", "dph_total": 0.02, "dlperf": 25.0,
-             "gpu_ram": 32768, "total_flops": 12.5, "reliability": 0.99},
+            {
+                "id": 1,
+                "gpu_name": "RTX 3080",
+                "dph_total": 0.03,
+                "dlperf": 27.0,
+                "gpu_ram": 10240,
+                "total_flops": 29.0,
+                "reliability": 0.98,
+            },
+            {
+                "id": 2,
+                "gpu_name": "Tesla V100",
+                "dph_total": 0.02,
+                "dlperf": 25.0,
+                "gpu_ram": 32768,
+                "total_flops": 12.5,
+                "reliability": 0.99,
+            },
         ]
         mgr._sdk = mock_sdk
         results = mgr.search_gpus(gpu_name="V100")
@@ -103,8 +136,10 @@ class TestVastGPUManager:
         mgr = self._manager()
         mock_sdk = MagicMock()
         mock_sdk.show_user.return_value = {
-            "credit": 10.0, "total_spend": -5.0,
-            "username": "user", "email": "u@test.com"
+            "credit": 10.0,
+            "total_spend": -5.0,
+            "username": "user",
+            "email": "u@test.com",
         }
         mgr._sdk = mock_sdk
         bal = mgr.get_balance()
@@ -128,7 +163,6 @@ class TestVastGPUManager:
         mock_sdk.show_instances.return_value = [{"id": 1}]
         mgr._sdk = mock_sdk
         assert mgr.get_ssh_command(1) is None
-
 
     def test_launch_by_offer_id_returns_contract(self):
         mgr = self._manager()
@@ -159,6 +193,7 @@ class TestVastGPUManager:
         mgr = self._manager()
         mock_sdk = MagicMock()
         import json
+
         mock_sdk.show_user.return_value = json.dumps({"credit": 5.0, "total_spend": -2.0})
         mgr._sdk = mock_sdk
         bal = mgr.get_balance()
@@ -178,8 +213,9 @@ class TestVastGPUManager:
         mock_sdk.search_offers.return_value = None
         mock_sdk.show_instances.return_value = []
         mgr._sdk = mock_sdk
-        with patch("services.vast.gpu_manager.manager.VastGPUManager._search_offers_rest",
-                   return_value=[]):
+        with patch(
+            "services.vast.gpu_manager.manager.VastGPUManager._search_offers_rest", return_value=[]
+        ):
             results = mgr.search_gpus()
         assert results == []
 
@@ -197,5 +233,5 @@ def test_quick_launch_calls_manager():
         mock_instance = MagicMock()
         mock_instance.launch_instance.return_value = {"new_contract": 1}
         MockMgr.return_value = mock_instance
-        result = quick_launch(gpu_name="RTX_3080", api_key="test-key")
+        quick_launch(gpu_name="RTX_3080", api_key="test-key")
         mock_instance.launch_instance.assert_called_once()

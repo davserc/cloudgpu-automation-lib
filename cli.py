@@ -111,7 +111,7 @@ def cmd_search(args):
             f"{offer.get('total_flops', 0):<5.1f} "
             f"{value:<6.0f} "
             f"{offer.get('cuda_max_good', 0):<5.1f} "
-            f"{offer.get('reliability', 0)*100:<4.0f} "
+            f"{offer.get('reliability', 0) * 100:<4.0f} "
             f"{location:<10}"
         )
 

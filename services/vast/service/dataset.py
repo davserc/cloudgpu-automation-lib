@@ -16,12 +16,14 @@ def _get_user_access_token(gcp_sa_b64: str) -> str | None:
         creds = json.loads(base64.b64decode(gcp_sa_b64))
         if creds.get("type") != "authorized_user":
             return None
-        data = urllib_parse.urlencode({
-            "client_id": creds["client_id"],
-            "client_secret": creds["client_secret"],
-            "refresh_token": creds["refresh_token"],
-            "grant_type": "refresh_token",
-        }).encode()
+        data = urllib_parse.urlencode(
+            {
+                "client_id": creds["client_id"],
+                "client_secret": creds["client_secret"],
+                "refresh_token": creds["refresh_token"],
+                "grant_type": "refresh_token",
+            }
+        ).encode()
         req = urllib_request.Request("https://oauth2.googleapis.com/token", data=data)
         with urllib_request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read())["access_token"]
@@ -80,7 +82,7 @@ def _build_dataset_cmds(
         # Use curl with Bearer token — works with authorized_user credentials without
         # needing gcloud account setup on the remote instance.
         # gs://bucket/path → https://storage.googleapis.com/storage/v1/b/bucket/o/encoded-path?alt=media
-        parts = dataset_gs_uri[len("gs://"):].split("/", 1)
+        parts = dataset_gs_uri[len("gs://") :].split("/", 1)
         bucket = parts[0]
         obj = urllib_parse.quote(parts[1], safe="") if len(parts) > 1 else ""
         https_url = f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{obj}?alt=media"
@@ -108,7 +110,7 @@ def _build_dataset_cmds(
         cmds.append(f"tar -xzf {shlex.quote(archive_path)} -C {shlex.quote(dataset_dst)}")
     elif archive_name.endswith(".zip"):
         cmds.append(
-            f"python3 -c \"import zipfile; zipfile.ZipFile({repr(archive_path)}).extractall({repr(dataset_dst)})\""
+            f'python3 -c "import zipfile; zipfile.ZipFile({repr(archive_path)}).extractall({repr(dataset_dst)})"'
         )
 
     return " && ".join(cmds), archive_path

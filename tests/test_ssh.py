@@ -1,7 +1,17 @@
-import pytest
 import subprocess
-from unittest.mock import MagicMock, patch, call
-from services.vast.service.ssh import ssh_base_args, ssh_user, known_hosts_file, wait_for_ssh, download, run, run_and_capture, run_with_retries
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from services.vast.service.ssh import (
+    download,
+    known_hosts_file,
+    run,
+    run_and_capture,
+    ssh_base_args,
+    ssh_user,
+    wait_for_ssh,
+)
 
 
 def test_ssh_base_args_contains_strict_checking():
@@ -37,8 +47,7 @@ class TestWaitForSsh:
 
     def test_returns_ssh_info_when_ready(self):
         mgr = self._make_manager()
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run:
+        with patch("socket.create_connection") as mock_conn, patch("subprocess.run") as mock_run:
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             mock_run.return_value = MagicMock(returncode=0)
@@ -47,9 +56,11 @@ class TestWaitForSsh:
 
     def test_raises_timeout_when_ssh_not_available(self):
         mgr = self._make_manager()
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run, \
-             patch("time.sleep"):
+        with (
+            patch("socket.create_connection") as mock_conn,
+            patch("subprocess.run"),
+            patch("time.sleep"),
+        ):
             mock_conn.side_effect = OSError("refused")
             with pytest.raises(TimeoutError):
                 wait_for_ssh(mgr, 1, timeout_sec=0, poll_interval_sec=1)
@@ -70,9 +81,11 @@ class TestWaitForSsh:
                 return MagicMock(returncode=255)
             return MagicMock(returncode=0)
 
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run", side_effect=fake_run), \
-             patch("time.sleep"):
+        with (
+            patch("socket.create_connection") as mock_conn,
+            patch("subprocess.run", side_effect=fake_run),
+            patch("time.sleep"),
+        ):
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             result = wait_for_ssh(mgr, 1, timeout_sec=30, poll_interval_sec=0)
@@ -84,14 +97,16 @@ class TestDownload:
     def _make_manager(self):
         mgr = MagicMock()
         mgr.get_instance.return_value = {
-            "id": 1, "ssh_host": "ssh1.vast.ai", "ssh_port": 12345, "status_msg": ""
+            "id": 1,
+            "ssh_host": "ssh1.vast.ai",
+            "ssh_port": 12345,
+            "status_msg": "",
         }
         return mgr
 
     def test_download_runs_scp(self):
         mgr = self._make_manager()
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run:
+        with patch("socket.create_connection") as mock_conn, patch("subprocess.run") as mock_run:
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             mock_run.return_value = MagicMock(returncode=0)
@@ -103,8 +118,7 @@ class TestDownload:
 
     def test_download_raises_on_scp_failure(self):
         mgr = self._make_manager()
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run:
+        with patch("socket.create_connection") as mock_conn, patch("subprocess.run") as mock_run:
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             mock_run.side_effect = [
@@ -119,15 +133,17 @@ class TestRunAndCapture:
     def _make_manager(self):
         mgr = MagicMock()
         mgr.get_instance.return_value = {
-            "id": 1, "ssh_host": "ssh1.vast.ai", "ssh_port": 12345, "status_msg": ""
+            "id": 1,
+            "ssh_host": "ssh1.vast.ai",
+            "ssh_port": 12345,
+            "status_msg": "",
         }
         return mgr
 
     def test_run_and_capture_writes_to_log(self, tmp_path):
         mgr = self._make_manager()
         log_path = tmp_path / "out.log"
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run:
+        with patch("socket.create_connection") as mock_conn, patch("subprocess.run") as mock_run:
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             mock_run.return_value = MagicMock(returncode=0)
@@ -137,13 +153,12 @@ class TestRunAndCapture:
     def test_run_and_capture_raises_on_nonzero(self, tmp_path):
         mgr = self._make_manager()
         log_path = tmp_path / "out.log"
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run:
+        with patch("socket.create_connection") as mock_conn, patch("subprocess.run") as mock_run:
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             mock_run.side_effect = [
-                MagicMock(returncode=0),   # ssh probe
-                MagicMock(returncode=1),   # actual command
+                MagicMock(returncode=0),  # ssh probe
+                MagicMock(returncode=1),  # actual command
             ]
             with pytest.raises(subprocess.CalledProcessError):
                 run_and_capture(mgr, 1, "false", log_path)
@@ -153,14 +168,16 @@ class TestRun:
     def _make_manager(self):
         mgr = MagicMock()
         mgr.get_instance.return_value = {
-            "id": 1, "ssh_host": "ssh1.vast.ai", "ssh_port": 12345, "status_msg": ""
+            "id": 1,
+            "ssh_host": "ssh1.vast.ai",
+            "ssh_port": 12345,
+            "status_msg": "",
         }
         return mgr
 
     def test_run_returns_zero_on_success(self):
         mgr = self._make_manager()
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run:
+        with patch("socket.create_connection") as mock_conn, patch("subprocess.run") as mock_run:
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             mock_run.return_value = MagicMock(returncode=0)
@@ -169,8 +186,7 @@ class TestRun:
 
     def test_run_raises_on_nonzero(self):
         mgr = self._make_manager()
-        with patch("socket.create_connection") as mock_conn, \
-             patch("subprocess.run") as mock_run:
+        with patch("socket.create_connection") as mock_conn, patch("subprocess.run") as mock_run:
             mock_conn.return_value.__enter__ = lambda s: s
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             # First call: SSH probe returns 0 so wait_for_ssh succeeds.

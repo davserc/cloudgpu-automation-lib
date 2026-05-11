@@ -90,13 +90,18 @@ def wait_for_ssh(
             if result.returncode == 0:
                 logger.debug(
                     "wait_for_ssh: SSH ready instance_id=%s host=%s port=%s job_id=%s",
-                    instance_id, host, port, job_id,
+                    instance_id,
+                    host,
+                    port,
+                    job_id,
                 )
                 return ssh_info
             # Exit 255 = gateway accepted TCP but container SSH not ready yet.
             logger.debug(
                 "wait_for_ssh: SSH not ready (rc=%s) instance_id=%s job_id=%s — retrying",
-                result.returncode, instance_id, job_id,
+                result.returncode,
+                instance_id,
+                job_id,
             )
         time.sleep(poll_interval_sec)
     raise TimeoutError(

@@ -145,7 +145,11 @@ def _rank_offers(
     Use max_cuda to impose an upper cap (cuda_max_good <= max_cuda).
     """
 
-    _blocked_countries = {c.strip().upper() for c in os.environ.get("VAST_BLOCKED_COUNTRIES", "CN,RU,IR").split(",") if c.strip()}
+    _blocked_countries = {
+        c.strip().upper()
+        for c in os.environ.get("VAST_BLOCKED_COUNTRIES", "CN,RU,IR").split(",")
+        if c.strip()
+    }
 
     def _is_blocked_location(geolocation: str) -> bool:
         if not geolocation or not _blocked_countries:
@@ -187,10 +191,23 @@ def _rank_offers(
     if not isinstance(offers, list):
         return []
 
-    logger.warning("_rank_offers: after search => %d offers (max_price=%s max_cuda=%s min_cuda=%s)", len(offers), max_price, max_cuda, min_cuda)
+    logger.warning(
+        "_rank_offers: after search => %d offers (max_price=%s max_cuda=%s min_cuda=%s)",
+        len(offers),
+        max_price,
+        max_cuda,
+        min_cuda,
+    )
     if offers:
         sample = offers[0]
-        logger.warning("_rank_offers: sample offer => id=%s gpu=%s dph_total=%s dlperf=%s cuda=%s", sample.get("id"), sample.get("gpu_name"), sample.get("dph_total"), sample.get("dlperf"), sample.get("cuda_max_good"))
+        logger.warning(
+            "_rank_offers: sample offer => id=%s gpu=%s dph_total=%s dlperf=%s cuda=%s",
+            sample.get("id"),
+            sample.get("gpu_name"),
+            sample.get("dph_total"),
+            sample.get("dlperf"),
+            sample.get("cuda_max_good"),
+        )
 
     if max_cuda is not None:
         before = len(offers)
