@@ -222,6 +222,11 @@ class VastGPUManager:
             result = self._search_offers_rest(query, limit)
 
         if isinstance(result, list):
+            # Client-side gpu_name filter (SDK may not filter server-side in all envs)
+            if gpu_name:
+                needle = gpu_name.replace("_", " ").upper()
+                result = [r for r in result if needle in r.get("gpu_name", "").upper()]
+
             # Filter by GPU family (prefix match)
             if gpu_family:
                 family_upper = gpu_family.upper()
@@ -429,13 +434,6 @@ class VastGPUManager:
         if env_parts:
             kwargs["env"] = " ".join(env_parts)
 
-        if jupyter:
-            kwargs["jupyter"] = True
-            kwargs["jupyter_dir"] = "/workspace"
-
-        if ssh:
-            kwargs["ssh"] = True
-
         logger.info("Launching instance: gpu=%s, image=%s", gpu_name, image)
         before_ids: set[int] = set()
         existing = self.list_instances()
@@ -551,13 +549,6 @@ class VastGPUManager:
 
         if env_parts:
             kwargs["env"] = " ".join(env_parts)
-
-        if jupyter:
-            kwargs["jupyter"] = True
-            kwargs["jupyter_dir"] = "/workspace"
-
-        if ssh:
-            kwargs["ssh"] = True
 
         logger.info("Launching instance from offer %d with image=%s", offer_id, image)
         before_ids: set[int] = set()

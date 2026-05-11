@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -144,6 +145,16 @@ def _rank_offers(
     Use max_cuda to impose an upper cap (cuda_max_good <= max_cuda).
     """
 
+    _blocked_countries = {c.strip().upper() for c in os.environ.get("VAST_BLOCKED_COUNTRIES", "CN,RU,IR").split(",") if c.strip()}
+
+    def _is_blocked_location(geolocation: str) -> bool:
+        if not geolocation or not _blocked_countries:
+            return False
+        # geolocation is like "Washington, US" or ", CN" or "Netherlands"
+        parts = [p.strip().upper() for p in geolocation.split(",")]
+        country = parts[-1] if parts else ""
+        return country in _blocked_countries
+
     def _is_discouraged_gpu(gpu_name: str) -> bool:
         name = gpu_name.upper()
         if "TESLA P4" in name:
@@ -176,30 +187,49 @@ def _rank_offers(
     if not isinstance(offers, list):
         return []
 
+    logger.warning("_rank_offers: after search => %d offers (max_price=%s max_cuda=%s min_cuda=%s)", len(offers), max_price, max_cuda, min_cuda)
+    if offers:
+        sample = offers[0]
+        logger.warning("_rank_offers: sample offer => id=%s gpu=%s dph_total=%s dlperf=%s cuda=%s", sample.get("id"), sample.get("gpu_name"), sample.get("dph_total"), sample.get("dlperf"), sample.get("cuda_max_good"))
+
     if max_cuda is not None:
+        before = len(offers)
         offers = [
             o
             for o in offers
             if o.get("cuda_max_good") is not None and o["cuda_max_good"] <= max_cuda
         ]
+        logger.warning("_rank_offers: after max_cuda filter => %d (was %d)", len(offers), before)
     if min_cuda is not None:
+        before = len(offers)
         offers = [
             o
             for o in offers
             if o.get("cuda_max_good") is not None and o["cuda_max_good"] >= min_cuda
         ]
+        logger.warning("_rank_offers: after min_cuda filter => %d (was %d)", len(offers), before)
 
+    before = len(offers)
     offers = [
         o
         for o in offers
         if o.get("gpu_name")
         and not _is_discouraged_gpu(o.get("gpu_name", ""))
-        and (o.get("dlperf") or 0) > 0
+        and not _is_blocked_location(o.get("geolocation", ""))
         and (o.get("dph_total") or 0) > 0
     ]
+    logger.warning("_rank_offers: after quality filter => %d (was %d)", len(offers), before)
 
     if not offers:
         return []
+
+    no_dlperf = [o for o in offers if not (o.get("dlperf") or 0) > 0]
+    if no_dlperf:
+        logger.warning(
+            "_rank_offers: %d/%d offers have dlperf=0; ranking by price only for those",
+            len(no_dlperf),
+            len(offers),
+        )
 
     if max_price is None:
         # Define "cheap" as within 2x the cheapest offer.
