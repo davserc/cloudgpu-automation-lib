@@ -16,6 +16,7 @@ from services.vast.service.dataset import (
     _build_dataset_cmds,
     _build_onstart_cmd,
     _build_train_command,
+    _get_user_access_token,
 )
 from services.vast.service.env import _resolve_min_cuda, _resolve_min_free_disk_gb
 from services.vast.service.offers import (
@@ -48,7 +49,9 @@ def _remote_ssh_user() -> str:
 
 
 def _remote_gcp_json_path() -> str:
-    return os.getenv("VAST_REMOTE_GCP_JSON_PATH", f"/home/{_remote_ssh_user()}/gcp.json")
+    user = _remote_ssh_user()
+    home = "/root" if user == "root" else f"/home/{user}"
+    return os.getenv("VAST_REMOTE_GCP_JSON_PATH", f"{home}/gcp.json")
 
 
 def _resolve_image(image: str) -> str:
@@ -80,11 +83,12 @@ def launch_offer(
         ports=ports,
         onstart_cmd=onstart_cmd,
         env_vars=env_vars,
-        ssh=True,
     )
 
     instance_id: int | None = None
     if isinstance(response, dict):
+        if response.get("success") is False:
+            raise RuntimeError(f"Offer {offer_id} rejected by API (success=False): {response}")
         raw_id = response.get("new_contract") or response.get("instance_id")
         if raw_id:
             instance_id = int(raw_id)
@@ -285,7 +289,9 @@ def _ensure_remote_gcp_json(
                 f"Failed to verify remote gcp.json after scp for instance {instance_id}"
             ) from exc
         if "present" not in out:
-            raise RuntimeError(f"remote gcp.json still missing after scp for instance {instance_id}")
+            raise RuntimeError(
+                f"remote gcp.json still missing after scp for instance {instance_id}"
+            )
     finally:
         if temp_path:
             try:
@@ -327,7 +333,7 @@ def _start_training_detached(
     exit_q = shlex.quote(remote_exit_path)
     script = f"{cmd}; echo $? > {exit_q}"
     start_cmd = (
-        "nohup sh -lc " f"{shlex.quote(script)}" f" > {log_q} 2>&1 < /dev/null & echo $! > {pid_q}"
+        f"nohup bash -c {shlex.quote(script)} > {log_q} 2>&1 < /dev/null & echo $! > {pid_q}"
     )
     _retry_on_ssh_transport_error(
         run_with_retries,
@@ -443,7 +449,10 @@ def train_with_cheapest_instance(
     if gcp_sa_b64 is None:
         gcp_sa_b64 = os.environ.get("GCP_SA_B64")
 
-    env_vars, onstart_cmd = _build_onstart_cmd(gcp_sa_b64, install_gsutil)
+    # Don't pass GCP credentials through the Vast.ai API (causes 400 if value is too long).
+    # gcp.json is uploaded via SCP by _ensure_remote_gcp_json after SSH is available.
+    _env_vars_for_launch, onstart_cmd = _build_onstart_cmd(gcp_sa_b64, install_gsutil)
+    launch_env_vars: dict[str, str] | None = None
 
     launch: LaunchResult | None = None
     last_boot_error: Exception | None = None
@@ -474,7 +483,7 @@ def train_with_cheapest_instance(
                 offer_id=int(next_offer["id"]),
                 image=image,
                 ports=ports,
-                env_vars=env_vars,
+                env_vars=launch_env_vars,
                 onstart_cmd=onstart_cmd,
                 disk_space=disk_space_gb,
                 job_id=job_id,
@@ -590,12 +599,18 @@ def train_with_cheapest_instance(
         if dataset_gs_uri:
             if not gcp_sa_b64:
                 raise ValueError("gcp_sa_b64 is required when dataset_gs_uri is provided")
+            access_token = _get_user_access_token(gcp_sa_b64)
+            if access_token:
+                logger.info(
+                    "dataset_prepare: using Bearer token (authorized_user) job_id=%s", job_id
+                )
             cmd_str, _ = _build_dataset_cmds(
                 dataset_gs_uri,
                 dataset_dst,
                 dataset_archive_name,
                 extract_cmd,
                 gcp_sa_b64,
+                access_token=access_token,
             )
             logger.info("dataset_prepare job_id=%s cmd=%s", job_id, cmd_str)
             run_with_retries(
@@ -620,6 +635,50 @@ def train_with_cheapest_instance(
                     backoff_sec=5.0,
                     job_id=job_id,
                 )
+        elif train_dataset_url and train_dataset_url.startswith(("http://", "https://")):
+            archive_name = dataset_archive_name or train_dataset_url.rstrip("/").split("/")[-1]
+            archive_path = f"{dataset_dst.rstrip('/')}/{archive_name}"
+            dl_cmd = (
+                f"wget -O {shlex.quote(archive_path)} {shlex.quote(train_dataset_url)}"
+                f" || curl -L --fail -o {shlex.quote(archive_path)} {shlex.quote(train_dataset_url)}"
+            )
+            http_cmds = [
+                f"mkdir -p {shlex.quote(dataset_dst)}",
+                dl_cmd,
+            ]
+            if extract_cmd:
+                http_cmds.append(extract_cmd.format(archive=archive_path, dst=dataset_dst))
+            elif archive_name.endswith(".tar.gz") or archive_name.endswith(".tgz"):
+                http_cmds.append(
+                    f"tar -xzf {shlex.quote(archive_path)} -C {shlex.quote(dataset_dst)}"
+                )
+            elif archive_name.endswith(".zip"):
+                http_cmds.append(
+                    f'python3 -c "import zipfile; zipfile.ZipFile({repr(archive_path)}).extractall({repr(dataset_dst)})"'
+                )
+            http_cmd_str = " && ".join(http_cmds)
+            logger.info("dataset_http_download job_id=%s cmd=%s", job_id, http_cmd_str)
+            run_with_retries(
+                manager,
+                launch.instance_id,
+                http_cmd_str,
+                retries=cmd_retries,
+                backoff_sec=cmd_backoff_sec,
+                job_id=job_id,
+            )
+            verify_cmd = (
+                f"ls -la {shlex.quote(dataset_dst)} && "
+                f"find {shlex.quote(dataset_dst)} -maxdepth 3 -type f -name '*.yaml' | head -n 20"
+            )
+            logger.info("dataset_verify job_id=%s cmd=%s", job_id, verify_cmd)
+            run_with_retries(
+                manager,
+                launch.instance_id,
+                verify_cmd,
+                retries=3,
+                backoff_sec=5.0,
+                job_id=job_id,
+            )
         if ensure_ultralytics and yolo_weights_name in run_cmd:
             install_ultralytics_cmd = "python3 -m pip install -U ultralytics"
             logger.info("ultralytics_install job_id=%s cmd=%s", job_id, install_ultralytics_cmd)

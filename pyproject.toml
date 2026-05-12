@@ -19,3 +19,13 @@ py-modules = ["vast_service", "vast_gpu_manager"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["services*"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=services --cov-report=term-missing --cov-fail-under=60"
+
+[tool.coverage.run]
+omit = ["venv/*", "tests/*", "*/examples/*", "*/workflow.py"]

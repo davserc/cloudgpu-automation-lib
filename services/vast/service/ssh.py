@@ -27,7 +27,7 @@ def known_hosts_file() -> str:
 def ssh_base_args() -> list[str]:
     return [
         "-o",
-        "StrictHostKeyChecking=yes",
+        "StrictHostKeyChecking=accept-new",
         "-o",
         f"UserKnownHostsFile={known_hosts_file()}",
         "-o",
@@ -61,6 +61,14 @@ def wait_for_ssh(
     """Wait until SSH is available for an instance or raise TimeoutError."""
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
+        instance = manager.get_instance(instance_id)
+        if instance:
+            status_msg = instance.get("status_msg") or ""
+            if "Error response from daemon" in status_msg or "failed to create" in status_msg:
+                raise TimeoutError(
+                    f"Instance {instance_id} container failed to start: {status_msg[:120]} job_id={job_id}"
+                )
+
         ssh_info = _get_ssh_info(manager, instance_id)
         if ssh_info:
             host, port = ssh_info
@@ -68,9 +76,33 @@ def wait_for_ssh(
                 import socket
 
                 with socket.create_connection((host, port), timeout=5):
-                    return ssh_info
+                    pass
             except OSError:
-                pass
+                time.sleep(poll_interval_sec)
+                continue
+
+            # TCP is open — verify the SSH daemon inside the container is ready.
+            result = subprocess.run(
+                ["ssh", "-p", str(port), *ssh_base_args(), f"{ssh_user()}@{host}", "true"],
+                capture_output=True,
+                timeout=12,
+            )
+            if result.returncode == 0:
+                logger.debug(
+                    "wait_for_ssh: SSH ready instance_id=%s host=%s port=%s job_id=%s",
+                    instance_id,
+                    host,
+                    port,
+                    job_id,
+                )
+                return ssh_info
+            # Exit 255 = gateway accepted TCP but container SSH not ready yet.
+            logger.debug(
+                "wait_for_ssh: SSH not ready (rc=%s) instance_id=%s job_id=%s — retrying",
+                result.returncode,
+                instance_id,
+                job_id,
+            )
         time.sleep(poll_interval_sec)
     raise TimeoutError(
         f"SSH not available for instance {instance_id} after {timeout_sec}s job_id={job_id}"
