@@ -42,7 +42,9 @@ class GPUConfig:
         disk_space: Disk space in GB.
     """
 
-    gpu_name: str = field(default_factory=lambda: get_env("DEFAULT_GPU_NAME", DEFAULT_GPU_NAME))
+    gpu_name: str = field(
+        default_factory=lambda: get_env("DEFAULT_GPU_NAME", DEFAULT_GPU_NAME) or DEFAULT_GPU_NAME
+    )
     num_gpus: int = field(default_factory=lambda: get_env_int("DEFAULT_NUM_GPUS", DEFAULT_NUM_GPUS))
     max_price: float = field(
         default_factory=lambda: get_env_float("DEFAULT_MAX_PRICE", DEFAULT_MAX_PRICE)
@@ -51,7 +53,9 @@ class GPUConfig:
         default_factory=lambda: get_env_float("DEFAULT_MIN_RELIABILITY", DEFAULT_MIN_RELIABILITY)
     )
     docker_image: str = field(
-        default_factory=lambda: get_env("DEFAULT_DOCKER_IMAGE", DEFAULT_DOCKER_IMAGE)
+        default_factory=lambda: (
+            get_env("DEFAULT_DOCKER_IMAGE", DEFAULT_DOCKER_IMAGE) or DEFAULT_DOCKER_IMAGE
+        )
     )
     disk_space: float = field(
         default_factory=lambda: max(
@@ -438,7 +442,7 @@ class VastGPUManager:
         before_ids: set[int] = set()
         existing = self.list_instances()
         if isinstance(existing, list):
-            before_ids = {inst.get("id") for inst in existing if inst.get("id")}
+            before_ids = {int(inst["id"]) for inst in existing if inst.get("id") is not None}
 
         result = self.sdk.launch_instance(**kwargs)
         if isinstance(result, dict):
@@ -554,7 +558,7 @@ class VastGPUManager:
         before_ids: set[int] = set()
         existing = self.list_instances()
         if isinstance(existing, list):
-            before_ids = {inst.get("id") for inst in existing if inst.get("id")}
+            before_ids = {int(inst["id"]) for inst in existing if inst.get("id") is not None}
 
         result = self.sdk.create_instance(**kwargs)
         logger.info("Launch response for offer %d: %s", offer_id, result)

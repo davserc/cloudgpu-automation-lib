@@ -21,7 +21,7 @@ where = ["."]
 include = ["services*"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "mypy>=1.8"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -29,3 +29,20 @@ addopts = "--cov=services --cov-report=term-missing --cov-fail-under=60"
 
 [tool.coverage.run]
 omit = ["venv/*", "tests/*", "*/examples/*", "*/workflow.py"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_unused_ignores = true
+exclude = ["venv/", "examples/"]
+
+[[tool.mypy.overrides]]
+module = [
+  "services.vast.gpu_manager.constants",
+  "services.vast.gpu_manager.errors",
+  "services.vast.gpu_manager.utils",
+  "services.vast.service.types",
+]
+disallow_untyped_defs = true
+warn_return_any = true
