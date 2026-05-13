@@ -74,7 +74,7 @@ def launch_offer(
     before_ids: set[int] = set()
     existing = manager.list_instances()
     if isinstance(existing, list):
-        before_ids = {inst.get("id") for inst in existing if inst.get("id")}
+        before_ids = {int(inst["id"]) for inst in existing if inst.get("id") is not None}
 
     response = manager.launch_by_offer_id(
         offer_id=offer_id,
@@ -545,6 +545,7 @@ def train_with_cheapest_instance(
             last_boot_error = None
             break
         except TimeoutError as exc:
+            assert launch is not None  # launch was set before wait_for_ssh raised
             last_boot_error = exc
             blacklist = _add_offer_blacklist(
                 blacklist, int(next_offer["id"]), offer_blacklist_ttl_sec
