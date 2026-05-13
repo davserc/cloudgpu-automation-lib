@@ -53,8 +53,9 @@ class GPUConfig:
         default_factory=lambda: get_env_float("DEFAULT_MIN_RELIABILITY", DEFAULT_MIN_RELIABILITY)
     )
     docker_image: str = field(
-        default_factory=lambda: get_env("DEFAULT_DOCKER_IMAGE", DEFAULT_DOCKER_IMAGE)
-        or DEFAULT_DOCKER_IMAGE
+        default_factory=lambda: (
+            get_env("DEFAULT_DOCKER_IMAGE", DEFAULT_DOCKER_IMAGE) or DEFAULT_DOCKER_IMAGE
+        )
     )
     disk_space: float = field(
         default_factory=lambda: max(
