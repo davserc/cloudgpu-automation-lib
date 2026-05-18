@@ -387,7 +387,7 @@ def train_with_cheapest_instance(
     ports: str | None,
     dataset_dst: str,
     run_cmd: str,
-    artifact_src: str,
+    artifact_src: str | list[str],
     artifact_dst: str | Path = "./",
     log_path: str | Path | None = None,
     raise_on_nonzero: bool = True,
