@@ -112,31 +112,50 @@ def wait_for_ssh(
 def download(
     manager: VastGPUManager,
     instance_id: int,
-    src: str,
+    src: str | list[str],
     dst: str | Path = "./",
     scp_bin: str = "scp",
     job_id: str | None = None,
 ) -> None:
+    """Download one file/dir from the remote instance.
+
+    If *src* is a list, each path is tried in order and the first successful
+    one wins.  This lets callers express fallbacks like ``[best.pt, last.pt]``
+    without knowing in advance which file the training produced.
+    """
     host, port = wait_for_ssh(manager, instance_id, job_id=job_id)
     dst_path = str(dst)
-    scp_cmd = [
-        scp_bin,
-        "-P",
-        str(port),
-        *ssh_base_args(),
-        "-r",
-        f"{ssh_user()}@{host}:{src}",
-        dst_path,
-    ]
-    logger.info(
-        "download instance_id=%s job_id=%s host=%s src=%s dst=%s",
-        instance_id,
-        job_id,
-        host,
-        src,
-        dst_path,
-    )
-    subprocess.run(scp_cmd, check=True)
+    sources = [src] if isinstance(src, str) else src
+
+    last_exc: Exception | None = None
+    for s in sources:
+        scp_cmd = [
+            scp_bin,
+            "-P",
+            str(port),
+            *ssh_base_args(),
+            "-r",
+            f"{ssh_user()}@{host}:{s}",
+            dst_path,
+        ]
+        logger.info(
+            "download instance_id=%s job_id=%s host=%s src=%s dst=%s",
+            instance_id,
+            job_id,
+            host,
+            s,
+            dst_path,
+        )
+        try:
+            subprocess.run(scp_cmd, check=True)
+            return  # success — stop trying
+        except subprocess.CalledProcessError as exc:
+            logger.warning(
+                "download failed for src=%s (will try next fallback): %s", s, exc
+            )
+            last_exc = exc
+
+    raise last_exc  # type: ignore[misc]  # all candidates exhausted
 
 
 def run(
