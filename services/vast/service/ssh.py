@@ -150,9 +150,7 @@ def download(
             subprocess.run(scp_cmd, check=True)
             return  # success — stop trying
         except subprocess.CalledProcessError as exc:
-            logger.warning(
-                "download failed for src=%s (will try next fallback): %s", s, exc
-            )
+            logger.warning("download failed for src=%s (will try next fallback): %s", s, exc)
             last_exc = exc
 
     raise last_exc  # type: ignore[misc]  # all candidates exhausted
