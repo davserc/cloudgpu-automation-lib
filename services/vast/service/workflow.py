@@ -423,6 +423,7 @@ def train_with_cheapest_instance(
     remote_train_pid: str = "/work/train.pid",
     remote_train_exit: str = "/work/train.exit",
     train_poll_interval_sec: int = 15,
+    log_download_interval: int = 5,
     ssh_transport_retries: int = 5,
     ssh_transport_backoff_sec: float = 5.0,
 ) -> LaunchResult:
@@ -759,6 +760,7 @@ def train_with_cheapest_instance(
                     retries=ssh_transport_retries,
                     backoff_sec=ssh_transport_backoff_sec,
                 )
+                poll_count = 0
                 while True:
                     status = _poll_training_status(
                         manager,
@@ -770,6 +772,22 @@ def train_with_cheapest_instance(
                         backoff_sec=ssh_transport_backoff_sec,
                     )
                     if status == "RUNNING":
+                        poll_count += 1
+                        if log_path is not None and poll_count % log_download_interval == 0:
+                            try:
+                                download(
+                                    manager,
+                                    launch.instance_id,
+                                    remote_train_log,
+                                    log_path,
+                                    job_id=job_id,
+                                )
+                            except Exception as exc:
+                                logger.debug(
+                                    "partial log download skipped job_id=%s: %s",
+                                    job_id,
+                                    exc,
+                                )
                         time.sleep(train_poll_interval_sec)
                         continue
                     if status.startswith("EXIT:"):
