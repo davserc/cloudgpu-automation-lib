@@ -548,6 +548,10 @@ def train_with_cheapest_instance(
         except TimeoutError as exc:
             assert launch is not None  # launch was set before wait_for_ssh raised
             last_boot_error = exc
+            logger.warning(
+                "boot_timeout instance_id=%s offer_id=%s attempt=%s/%s job_id=%s error=%s",
+                launch.instance_id, next_offer["id"], attempts, max_launch_attempts, job_id, exc,
+            )
             blacklist = _add_offer_blacklist(
                 blacklist, int(next_offer["id"]), offer_blacklist_ttl_sec
             )

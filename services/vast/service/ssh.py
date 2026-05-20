@@ -65,6 +65,10 @@ def wait_for_ssh(
         if instance:
             status_msg = instance.get("status_msg") or ""
             if "Error response from daemon" in status_msg or "failed to create" in status_msg:
+                logger.error(
+                    "instance_id=%s job_id=%s container_error status_msg=%s",
+                    instance_id, job_id, status_msg[:300],
+                )
                 raise TimeoutError(
                     f"Instance {instance_id} container failed to start: {status_msg[:120]} job_id={job_id}"
                 )
