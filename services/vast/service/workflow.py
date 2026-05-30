@@ -35,7 +35,6 @@ from services.vast.service.ssh import (
     run_and_capture,
     run_and_get_output,
     run_with_retries,
-    ssh_base_args,
     wait_for_ssh,
 )
 from services.vast.service.types import LaunchResult
@@ -333,7 +332,7 @@ def _retry_on_ssh_transport_error(
     for attempt in range(1, retries + 1):
         try:
             return fn(*args, **kwargs)
-        except subprocess.TimeoutExpired as exc:
+        except subprocess.TimeoutExpired:
             if attempt < retries:
                 logger.warning(
                     "ssh_transport_timeout attempt=%s/%s — retrying in %.0fs",
