@@ -21,9 +21,11 @@ from services.vast.service.env import (
     _resolve_min_free_disk_gb,
 )
 from services.vast.service.offers import (
+    _add_host_blacklist,
     _add_offer_blacklist,
     _format_offer_header,
     _format_offer_line,
+    _is_host_blacklisted,
     _is_offer_blacklisted,
     _load_offer_blacklist,
     _log_selected_offer,
@@ -70,6 +72,8 @@ __all__ = [
     "_prune_offer_blacklist",
     "_add_offer_blacklist",
     "_is_offer_blacklisted",
+    "_add_host_blacklist",
+    "_is_host_blacklisted",
     "wait_for_ssh",
     "download",
     "run",

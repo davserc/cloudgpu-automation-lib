@@ -259,12 +259,19 @@ def cmd_list(args):
         ssh_cmd = ""
         host = inst.get("ssh_host")
         port = inst.get("ssh_port")
+        status = (
+            inst.get("actual_status")
+            or inst.get("cur_state")
+            or inst.get("intended_status")
+            or inst.get("next_state")
+            or "unknown"
+        )
         if host and port:
             ssh_cmd = f"ssh -p {port} {ssh_user()}@{host}"
 
         print(
             f"{inst.get('id') or 'N/A':<12} "
-            f"{inst.get('actual_status') or 'unknown':<15} "
+            f"{status:<15} "
             f"{inst.get('gpu_name') or 'N/A':<20} "
             f"{ssh_cmd:<30}"
         )
