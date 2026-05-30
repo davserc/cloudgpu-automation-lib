@@ -24,6 +24,7 @@ def _format_offer_header() -> str:
         f"{'DLP/$':<6} "
         f"{'CUDA':<5} "
         f"{'Rel':<4} "
+        f"{'↓Mbps':<6} "
         f"{'Location':<10}"
     )
 
@@ -36,6 +37,7 @@ def _format_offer_line(offer: dict[str, Any]) -> str:
     location = offer.get("geolocation") or "N/A"
     if len(location) > 10:
         location = location[:8] + ".."
+    inet_down = offer.get("inet_down") or 0
     return (
         f"{offer.get('id', 'N/A'):<10} "
         f"{offer.get('gpu_name', 'N/A'):<16} "
@@ -47,6 +49,7 @@ def _format_offer_line(offer: dict[str, Any]) -> str:
         f"{value:<6.0f} "
         f"{offer.get('cuda_max_good', 0):<5.1f} "
         f"{offer.get('reliability', 0) * 100:<4.0f} "
+        f"{inet_down:<6.0f} "
         f"{location:<10}"
     )
 
@@ -91,6 +94,10 @@ def _prune_offer_blacklist(data: dict[str, Any], ttl_sec: int) -> dict[str, Any]
     if not isinstance(offers, dict):
         offers = {}
     data["offers"] = {k: v for k, v in offers.items() if isinstance(v, int | float) and v > now}
+    hosts = data.get("hosts", {})
+    if not isinstance(hosts, dict):
+        hosts = {}
+    data["hosts"] = {k: v for k, v in hosts.items() if isinstance(v, int | float) and v > now}
     data["ttl_sec"] = ttl_sec
     data["updated_at"] = now
     return data
@@ -113,6 +120,26 @@ def _is_offer_blacklisted(data: dict[str, Any], offer_id: int) -> bool:
     if not isinstance(offers, dict):
         return False
     expiry = offers.get(str(offer_id))
+    return isinstance(expiry, int | float) and expiry > time.time()
+
+
+def _add_host_blacklist(data: dict[str, Any], host_id: int | str, ttl_sec: int) -> dict[str, Any]:
+    now = time.time()
+    hosts = data.get("hosts", {})
+    if not isinstance(hosts, dict):
+        hosts = {}
+    hosts[str(host_id)] = now + ttl_sec
+    data["hosts"] = hosts
+    data["ttl_sec"] = ttl_sec
+    data["updated_at"] = now
+    return data
+
+
+def _is_host_blacklisted(data: dict[str, Any], host_id: int | str) -> bool:
+    hosts = data.get("hosts", {})
+    if not isinstance(hosts, dict):
+        return False
+    expiry = hosts.get(str(host_id))
     return isinstance(expiry, int | float) and expiry > time.time()
 
 
@@ -161,17 +188,31 @@ def _rank_offers(
 
     def _is_discouraged_gpu(gpu_name: str) -> bool:
         name = gpu_name.upper()
-        if "TESLA P4" in name:
+        # Non-NVIDIA: no CUDA support
+        if any(x in name for x in ("RADEON", "RX 6", "RX 7", "RX 8", "INTEL ARC", "ARC A")):
             return True
-        if "QUADRO P2000" in name:
+        # Laptop/embedded GPUs: too weak
+        if any(x in name for x in ("MX150", "MX250", "MX350", "MX450", "MX550", "MX570")):
             return True
+        # Old Tesla/Quadro compute cards with CUDA 12 support but no good for training
+        if "TESLA P4" in name or "TESLA P100" in name:
+            return True
+        if any(x in name for x in ("QUADRO P2000", "QUADRO P4000", "QUADRO P5000", "QUADRO P6000")):
+            return True
+        # Non-RTX Titan (K80/M40/etc already filtered by min_cuda=12)
         if "TITAN" in name and "TITAN RTX" not in name:
             return True
+        # GTX 10-series: no tensor cores, slow for YOLO
         if "GTX" in name:
-            # Discard GTX 10-series (older/less efficient for training)
             for model in ("1050", "1060", "1070", "1080", "1090"):
                 if f"GTX {model}" in name:
                     return True
+        # GTX 16-series: no tensor cores (Turing without RT/Tensor)
+        if "GTX 16" in name:
+            return True
+        # RTX 20-series with ≤6GB VRAM (RTX 2060 6GB): too small for imgsz=896
+        if "RTX 2060" in name and "SUPER" not in name:
+            return True
         return False
 
     offers = manager.search_gpus(
@@ -226,6 +267,25 @@ def _rank_offers(
         ]
         logger.warning("_rank_offers: after min_cuda filter => %d (was %d)", len(offers), before)
 
+    _min_compute_cap_raw = os.environ.get("VAST_MIN_COMPUTE_CAP")
+    if _min_compute_cap_raw:
+        try:
+            _min_compute_cap = int(_min_compute_cap_raw)
+            before = len(offers)
+            offers = [
+                o for o in offers
+                if (o.get("compute_cap") or 0) >= _min_compute_cap
+            ]
+            logger.warning(
+                "_rank_offers: after compute_cap filter (min=%d) => %d (was %d)",
+                _min_compute_cap, len(offers), before,
+            )
+        except ValueError:
+            logger.warning("VAST_MIN_COMPUTE_CAP invalid value=%s, skipping", _min_compute_cap_raw)
+
+    _min_vram_gb = float(os.environ.get("VAST_MIN_VRAM_GB", "10") or "10")
+    _min_inet_down_mbps = float(os.environ.get("VAST_MIN_INET_DOWN_MBPS", "0") or "0")
+
     before = len(offers)
     offers = [
         o
@@ -234,39 +294,66 @@ def _rank_offers(
         and not _is_discouraged_gpu(o.get("gpu_name", ""))
         and not _is_blocked_location(o.get("geolocation", ""))
         and (o.get("dph_total") or 0) > 0
+        and (o.get("gpu_ram") or 0) / 1024 >= _min_vram_gb
     ]
-    logger.warning("_rank_offers: after quality filter => %d (was %d)", len(offers), before)
+    logger.warning(
+        "_rank_offers: after quality filter (min_vram=%.0fGB) => %d (was %d)",
+        _min_vram_gb, len(offers), before,
+    )
 
-    if not offers:
-        return []
-
-    no_dlperf = [o for o in offers if not (o.get("dlperf") or 0) > 0]
-    if no_dlperf:
+    if _min_inet_down_mbps > 0:
+        before = len(offers)
+        offers = [o for o in offers if (o.get("inet_down") or 0) >= _min_inet_down_mbps]
         logger.warning(
-            "_rank_offers: %d/%d offers have dlperf=0; ranking by price only for those",
-            len(no_dlperf),
-            len(offers),
+            "_rank_offers: after inet_down filter (min=%.0f Mbps) => %d (was %d)",
+            _min_inet_down_mbps, len(offers), before,
         )
 
-    if max_price is None:
-        # Define "cheap" as within 2x the cheapest offer.
-        min_price = min(o.get("dph_total", float("inf")) for o in offers)
-        cheap_cap = min_price * 2.0 if min_price != float("inf") else None
-        if cheap_cap:
-            cheap_offers = [o for o in offers if o.get("dph_total", 0) <= cheap_cap]
-            if cheap_offers:
-                offers = cheap_offers
+    if not offers:
+        return []
 
     if not offers:
         return []
 
-    # Rank by value first, then VRAM, then price.
-    def _score_key(o: dict[str, Any]) -> tuple[float, float, float]:
-        price = o.get("dph_total", 0) or 0
-        dlperf = o.get("dlperf", 0) or 0
-        vram_gb = (o.get("gpu_ram", 0) or 0) / 1024.0
-        value = dlperf / price if price > 0 else 0
-        return (value, vram_gb, -price)
+    # Priority: 1) price (cheapest first), 2) CUDA version (higher first),
+    # 3) zone preference (configured via VAST_PREFERRED_ZONES env var).
+    #
+    # VAST_PREFERRED_ZONES: comma-separated country codes in preference order.
+    # Example: "US,CA,PL,DE,NL,GB"  (first = most preferred)
+    # Offers whose country code is not in the list get lowest priority.
+    _preferred_zones = [
+        z.strip().upper()
+        for z in os.environ.get("VAST_PREFERRED_ZONES", "US,CA,PL,DE,NL,GB,CZ,FR,ES,IT").split(",")
+        if z.strip()
+    ]
 
-    offers.sort(key=_score_key, reverse=True)
+    def _zone_rank(geolocation: str) -> int:
+        if not geolocation:
+            return len(_preferred_zones)
+        # geolocation format: "Washington, US" / "Quebec, CA" / ", CN"
+        parts = [p.strip().upper() for p in geolocation.split(",")]
+        country = parts[-1] if parts else ""
+        try:
+            return _preferred_zones.index(country)
+        except ValueError:
+            return len(_preferred_zones)
+
+    # Round price to 3 decimal places so near-identical prices ($0.035 vs $0.0351)
+    # don't block the CUDA/zone tiebreakers from kicking in.
+    def _score_key(o: dict[str, Any]) -> tuple[float, float, int]:
+        price = round(o.get("dph_total", 0) or 0, 3)
+        cuda = o.get("cuda_max_good", 0) or 0
+        zone = _zone_rank(o.get("geolocation", ""))
+        return (price, -cuda, zone)  # ascending: cheaper → higher CUDA → preferred zone
+
+    offers.sort(key=_score_key)
+
+    logger.info(
+        "_rank_offers: top-3 after priority sort => %s",
+        [
+            f"{o.get('id')}({o.get('geolocation','?')},${o.get('dph_total',0):.3f},cuda={o.get('cuda_max_good')})"
+            for o in offers[:3]
+        ],
+    )
+
     return offers

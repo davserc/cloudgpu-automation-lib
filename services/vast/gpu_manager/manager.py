@@ -495,6 +495,7 @@ class VastGPUManager:
         ports: str | None = None,
         onstart_cmd: str | None = None,
         env_vars: dict[str, str] | None = None,
+        image_login: str | None = None,
         jupyter: bool = False,
         ssh: bool = True,
         fallback_timeout_sec: int = 60,
@@ -553,6 +554,9 @@ class VastGPUManager:
 
         if env_parts:
             kwargs["env"] = " ".join(env_parts)
+
+        if image_login:
+            kwargs["login"] = image_login  # SDK param name is "login", maps to "image_login" in API body
 
         logger.info("Launching instance from offer %d with image=%s", offer_id, image)
         before_ids: set[int] = set()

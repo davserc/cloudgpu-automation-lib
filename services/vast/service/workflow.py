@@ -5,7 +5,6 @@ import logging
 import os
 import shlex
 import subprocess
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,9 @@ from services.vast.service.dataset import (
 )
 from services.vast.service.env import _resolve_min_cuda, _resolve_min_free_disk_gb
 from services.vast.service.offers import (
+    _add_host_blacklist,
     _add_offer_blacklist,
+    _is_host_blacklisted,
     _is_offer_blacklisted,
     _load_offer_blacklist,
     _log_selected_offer,
@@ -42,6 +43,35 @@ from services.vast.service.types import LaunchResult
 logger = logging.getLogger("vast_service")
 
 SSH_TRANSPORT_EXIT_CODE = 255
+_CUDA_FAIL_MARKERS = [
+    "CUDA_NOT_AVAILABLE:",
+    "CUDA initialization: CUDA unknown error",
+    "Invalid CUDA 'device=0' requested",
+    "CUDA error: no kernel image is available",
+]
+
+
+def _maybe_blacklist_on_cuda_failure(
+    log_path: str | Path | None,
+    offer_id: int,
+    blacklist: dict,
+    blacklist_path: str | Path,
+    ttl_sec: int,
+) -> None:
+    if not log_path:
+        return
+    try:
+        text = Path(log_path).read_text(errors="ignore")
+    except OSError:
+        return
+    if not any(marker in text for marker in _CUDA_FAIL_MARKERS):
+        return
+    logger.warning(
+        "cuda_failure_detected offer_id=%s — blacklisting for %ds", offer_id, ttl_sec
+    )
+    updated = _add_offer_blacklist(blacklist, offer_id, ttl_sec)
+    _save_offer_blacklist(blacklist_path, updated)
+    blacklist.update(updated)
 
 
 def _remote_ssh_user() -> str:
@@ -65,6 +95,7 @@ def launch_offer(
     ports: str | None = None,
     onstart_cmd: str | None = None,
     env_vars: dict[str, str] | None = None,
+    image_login: str | None = None,
     disk_space: float | None = None,
     fallback_timeout_sec: int = 60,
     fallback_poll_sec: int = 5,
@@ -83,6 +114,7 @@ def launch_offer(
         ports=ports,
         onstart_cmd=onstart_cmd,
         env_vars=env_vars,
+        image_login=image_login,
     )
 
     instance_id: int | None = None
@@ -224,80 +256,71 @@ def _ensure_remote_gcp_json(
     gcp_sa_b64: str,
     job_id: str | None = None,
 ) -> None:
-    """Ensure remote gcp.json exists on the instance; fallback to SCP if missing."""
+    """Ensure remote gcp.json exists on the instance by writing it over SSH."""
     try:
         decoded = base64.b64decode(gcp_sa_b64, validate=True)
     except Exception as exc:  # noqa: BLE001 - surface invalid secrets early
         logger.warning("Invalid GCP_SA_B64; cannot create remote gcp.json (%s)", exc)
         return
 
-    temp_path = None
+    remote_gcp_json = _remote_gcp_json_path()
     try:
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(decoded)
-            temp_path = tmp.name
-        os.chmod(temp_path, 0o600)
-
-        remote_gcp_json = _remote_gcp_json_path()
-        try:
-            out = run_and_get_output(
-                manager,
-                instance_id,
-                f"test -s {shlex.quote(remote_gcp_json)} && echo present || echo missing",
-                job_id=job_id,
-            ).strip()
-            if "present" in out:
-                return
-        except subprocess.CalledProcessError:
-            pass
-
-        host, port = wait_for_ssh(manager, instance_id, job_id=job_id)
-        scp_cmd = [
-            "scp",
-            "-P",
-            str(port),
-            *ssh_base_args(),
-            temp_path,
-            f"{_remote_ssh_user()}@{host}:{remote_gcp_json}",
-        ]
-        logger.info(
-            "gcp.json missing on instance %s; uploading via scp (host=%s port=%s)",
+        out = run_and_get_output(
+            manager,
             instance_id,
-            host,
-            port,
-        )
-        try:
-            result = subprocess.run(scp_cmd, check=True, capture_output=True, text=True)
-            if result.stdout:
-                logger.info("gcp.json scp stdout:\n%s", result.stdout)
-            if result.stderr:
-                logger.warning("gcp.json scp stderr:\n%s", result.stderr)
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(
-                f"Failed to upload /root/gcp.json via scp for instance {instance_id}"
-            ) from exc
+            f"test -s {shlex.quote(remote_gcp_json)} && echo present || echo missing",
+            job_id=job_id,
+        ).strip()
+        if "present" in out:
+            return
+    except subprocess.CalledProcessError:
+        pass
 
-        try:
-            out = run_and_get_output(
-                manager,
-                instance_id,
-                f"test -s {shlex.quote(remote_gcp_json)} && echo present || echo missing",
-                job_id=job_id,
-            ).strip()
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(
-                f"Failed to verify remote gcp.json after scp for instance {instance_id}"
-            ) from exc
-        if "present" not in out:
-            raise RuntimeError(
-                f"remote gcp.json still missing after scp for instance {instance_id}"
-            )
-    finally:
-        if temp_path:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+    logger.info(
+        "gcp.json missing on instance %s; writing via SSH",
+        instance_id,
+    )
+
+    # Write gcp.json via SSH using the same channel that already works.
+    # Avoids SCP (separate binary, separate auth handshake, no timeout control).
+    # The JSON content is re-encoded as base64 so it survives shell quoting safely.
+    b64_content = base64.b64encode(decoded).decode("ascii")
+    remote_dir = shlex.quote(str(Path(remote_gcp_json).parent))
+    write_cmd = (
+        f"mkdir -p {remote_dir} && "
+        f"printf '%s' {shlex.quote(b64_content)} | base64 -d > {shlex.quote(remote_gcp_json)} && "
+        f"chmod 600 {shlex.quote(remote_gcp_json)}"
+    )
+    try:
+        run_with_retries(
+            manager,
+            instance_id,
+            write_cmd,
+            retries=3,
+            backoff_sec=5.0,
+            job_id=job_id,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"Failed to write /root/gcp.json via SSH for instance {instance_id}: "
+            f"stdout={exc.stdout!r} stderr={exc.stderr!r}"
+        ) from exc
+
+    try:
+        out = run_and_get_output(
+            manager,
+            instance_id,
+            f"test -s {shlex.quote(remote_gcp_json)} && echo present || echo missing",
+            job_id=job_id,
+        ).strip()
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"Failed to verify remote gcp.json for instance {instance_id}"
+        ) from exc
+    if "present" not in out:
+        raise RuntimeError(
+            f"remote gcp.json still missing after SSH write for instance {instance_id}"
+        )
 
 
 def _retry_on_ssh_transport_error(
@@ -310,6 +333,15 @@ def _retry_on_ssh_transport_error(
     for attempt in range(1, retries + 1):
         try:
             return fn(*args, **kwargs)
+        except subprocess.TimeoutExpired as exc:
+            if attempt < retries:
+                logger.warning(
+                    "ssh_transport_timeout attempt=%s/%s — retrying in %.0fs",
+                    attempt, retries, backoff_sec * attempt,
+                )
+                time.sleep(backoff_sec * attempt)
+                continue
+            raise
         except subprocess.CalledProcessError as exc:
             if exc.returncode == SSH_TRANSPORT_EXIT_CODE and attempt < retries:
                 time.sleep(backoff_sec * attempt)
@@ -411,9 +443,12 @@ def train_with_cheapest_instance(
     destroy_backoff_sec: float = 5.0,
     offer_blacklist_path: str | Path = ".vast_offer_blacklist.json",
     offer_blacklist_ttl_sec: int = 3600,
+    boot_timeout_blacklist_ttl_sec: int | None = None,
     min_free_disk_gb: float | None = None,
     free_disk_path: str | None = None,
     disk_space_gb: float | None = None,
+    dockerhub_username: str | None = None,
+    dockerhub_password: str | None = None,
     ensure_yolo_weights: bool = True,
     yolo_weights_name: str = "yolo11s.pt",
     ensure_ultralytics: bool = True,
@@ -450,6 +485,13 @@ def train_with_cheapest_instance(
     if gcp_sa_b64 is None:
         gcp_sa_b64 = os.environ.get("GCP_SA_B64")
 
+    dockerhub_username = dockerhub_username or os.environ.get("DOCKERHUB_USERNAME")
+    dockerhub_password = dockerhub_password or os.environ.get("DOCKERHUB_PASSWORD")
+    image_login: str | None = None
+    if dockerhub_username and dockerhub_password:
+        image_login = f"-u {dockerhub_username} -p {dockerhub_password}"
+        logger.info("dockerhub_auth=enabled user=%s", dockerhub_username)
+
     # Don't pass GCP credentials through the Vast.ai API (causes 400 if value is too long).
     # gcp.json is uploaded via SCP by _ensure_remote_gcp_json after SSH is available.
     _env_vars_for_launch, onstart_cmd = _build_onstart_cmd(gcp_sa_b64, install_gsutil)
@@ -470,6 +512,9 @@ def train_with_cheapest_instance(
             if offer_id and offer_id not in tried_offer_ids:
                 if _is_offer_blacklisted(blacklist, offer_id):
                     continue
+                host_id = offer.get("host_id") or offer.get("machine_id")
+                if host_id and _is_host_blacklisted(blacklist, host_id):
+                    continue
                 next_offer = offer
                 tried_offer_ids.add(offer_id)
                 break
@@ -486,11 +531,16 @@ def train_with_cheapest_instance(
                 ports=ports,
                 env_vars=launch_env_vars,
                 onstart_cmd=onstart_cmd,
+                image_login=image_login,
                 disk_space=disk_space_gb,
                 job_id=job_id,
             )
         except Exception as exc:  # noqa: BLE001
             last_boot_error = exc
+            logger.error(
+                "launch_offer failed offer_id=%s job_id=%s attempt=%s/%s error=%s",
+                next_offer["id"], job_id, attempts, max_launch_attempts, exc,
+            )
             blacklist = _add_offer_blacklist(
                 blacklist, int(next_offer["id"]), offer_blacklist_ttl_sec
             )
@@ -552,9 +602,16 @@ def train_with_cheapest_instance(
                 "boot_timeout instance_id=%s offer_id=%s attempt=%s/%s job_id=%s error=%s",
                 launch.instance_id, next_offer["id"], attempts, max_launch_attempts, job_id, exc,
             )
-            blacklist = _add_offer_blacklist(
-                blacklist, int(next_offer["id"]), offer_blacklist_ttl_sec
-            )
+            # Boot timeout is transient (slow boot, flaky network) — use a shorter TTL
+            # than CUDA failures so the offer can be retried sooner in future jobs.
+            _boot_ttl = boot_timeout_blacklist_ttl_sec if boot_timeout_blacklist_ttl_sec is not None else offer_blacklist_ttl_sec
+            blacklist = _add_offer_blacklist(blacklist, int(next_offer["id"]), _boot_ttl)
+            host_id = next_offer.get("host_id") or next_offer.get("machine_id")
+            if host_id:
+                blacklist = _add_host_blacklist(blacklist, host_id, _boot_ttl)
+                logger.warning(
+                    "boot_timeout host_blacklisted host_id=%s ttl=%ds", host_id, _boot_ttl
+                )
             _save_offer_blacklist(offer_blacklist_path, blacklist)
             # Instance didn't come up in time; destroy and try next offer.
             try:
@@ -568,6 +625,37 @@ def train_with_cheapest_instance(
             except Exception as destroy_exc:  # noqa: BLE001 - log and keep retrying
                 logger.warning(
                     "Failed to destroy instance %s after boot timeout: %s",
+                    launch.instance_id,
+                    destroy_exc,
+                )
+                stale_instance_ids.append(launch.instance_id)
+            launch = None
+            time.sleep(launch_retry_backoff_sec)
+        except Exception as exc:  # noqa: BLE001 - transient error (network, SSL, unexpected)
+            assert launch is not None
+            last_boot_error = exc
+            logger.warning(
+                "instance_error instance_id=%s offer_id=%s attempt=%s/%s job_id=%s error=%s",
+                launch.instance_id,
+                next_offer["id"],
+                attempts,
+                max_launch_attempts,
+                job_id,
+                exc,
+            )
+            # Don't blacklist the offer — error may be transient (SSL/network from worker pod).
+            # tried_offer_ids already prevents retrying the same offer within this job.
+            try:
+                destroy_with_retries(
+                    manager,
+                    launch.instance_id,
+                    retries=destroy_retries,
+                    backoff_sec=destroy_backoff_sec,
+                    job_id=job_id,
+                )
+            except Exception as destroy_exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to destroy instance %s after error: %s",
                     launch.instance_id,
                     destroy_exc,
                 )
@@ -685,9 +773,17 @@ def train_with_cheapest_instance(
                 backoff_sec=5.0,
                 job_id=job_id,
             )
-        if ensure_ultralytics and yolo_weights_name in run_cmd:
-            install_ultralytics_cmd = "python3 -m pip install -U ultralytics"
-            logger.info("ultralytics_install job_id=%s cmd=%s", job_id, install_ultralytics_cmd)
+        if ensure_ultralytics:
+            # Install ultralytics regardless of whether yolo_weights_name appears
+            # literally in run_cmd. Two-phase mode (run_service.sh) uses MODEL_SCALE
+            # to derive the weights name at runtime, so yolo_weights_name is never
+            # literally present in run_cmd, but ultralytics is still required.
+            # Check importability first to skip pip when the image already has it.
+            install_ultralytics_cmd = (
+                "python3 -c 'import ultralytics' 2>/dev/null"
+                " || python3 -m pip install -U ultralytics"
+            )
+            logger.info("ultralytics_check job_id=%s cmd=%s", job_id, install_ultralytics_cmd)
             run_with_retries(
                 manager,
                 launch.instance_id,
@@ -812,6 +908,18 @@ def train_with_cheapest_instance(
                         log_path,
                         job_id=job_id,
                     )
+                # Blacklist offer and raise early if training failed (avoids
+                # a confusing SCP error masking the real training failure).
+                if exit_code and exit_code != 0:
+                    _maybe_blacklist_on_cuda_failure(
+                        log_path,
+                        launch.offer_id,
+                        blacklist,
+                        offer_blacklist_path,
+                        offer_blacklist_ttl_sec,
+                    )
+                    if raise_on_nonzero:
+                        raise subprocess.CalledProcessError(exit_code, run_cmd)
             else:
                 if log_path is None:
                     exit_code = run_with_retries(
