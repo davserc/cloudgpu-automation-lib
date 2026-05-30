@@ -272,13 +272,12 @@ def _rank_offers(
         try:
             _min_compute_cap = int(_min_compute_cap_raw)
             before = len(offers)
-            offers = [
-                o for o in offers
-                if (o.get("compute_cap") or 0) >= _min_compute_cap
-            ]
+            offers = [o for o in offers if (o.get("compute_cap") or 0) >= _min_compute_cap]
             logger.warning(
                 "_rank_offers: after compute_cap filter (min=%d) => %d (was %d)",
-                _min_compute_cap, len(offers), before,
+                _min_compute_cap,
+                len(offers),
+                before,
             )
         except ValueError:
             logger.warning("VAST_MIN_COMPUTE_CAP invalid value=%s, skipping", _min_compute_cap_raw)
@@ -298,7 +297,9 @@ def _rank_offers(
     ]
     logger.warning(
         "_rank_offers: after quality filter (min_vram=%.0fGB) => %d (was %d)",
-        _min_vram_gb, len(offers), before,
+        _min_vram_gb,
+        len(offers),
+        before,
     )
 
     if _min_inet_down_mbps > 0:
@@ -306,7 +307,9 @@ def _rank_offers(
         offers = [o for o in offers if (o.get("inet_down") or 0) >= _min_inet_down_mbps]
         logger.warning(
             "_rank_offers: after inet_down filter (min=%.0f Mbps) => %d (was %d)",
-            _min_inet_down_mbps, len(offers), before,
+            _min_inet_down_mbps,
+            len(offers),
+            before,
         )
 
     if not offers:
@@ -351,7 +354,7 @@ def _rank_offers(
     logger.info(
         "_rank_offers: top-3 after priority sort => %s",
         [
-            f"{o.get('id')}({o.get('geolocation','?')},${o.get('dph_total',0):.3f},cuda={o.get('cuda_max_good')})"
+            f"{o.get('id')}({o.get('geolocation', '?')},${o.get('dph_total', 0):.3f},cuda={o.get('cuda_max_good')})"
             for o in offers[:3]
         ],
     )

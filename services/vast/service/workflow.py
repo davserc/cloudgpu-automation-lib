@@ -65,9 +65,7 @@ def _maybe_blacklist_on_cuda_failure(
         return
     if not any(marker in text for marker in _CUDA_FAIL_MARKERS):
         return
-    logger.warning(
-        "cuda_failure_detected offer_id=%s — blacklisting for %ds", offer_id, ttl_sec
-    )
+    logger.warning("cuda_failure_detected offer_id=%s — blacklisting for %ds", offer_id, ttl_sec)
     updated = _add_offer_blacklist(blacklist, offer_id, ttl_sec)
     _save_offer_blacklist(blacklist_path, updated)
     blacklist.update(updated)
@@ -313,9 +311,7 @@ def _ensure_remote_gcp_json(
             job_id=job_id,
         ).strip()
     except subprocess.CalledProcessError as exc:
-        raise RuntimeError(
-            f"Failed to verify remote gcp.json for instance {instance_id}"
-        ) from exc
+        raise RuntimeError(f"Failed to verify remote gcp.json for instance {instance_id}") from exc
     if "present" not in out:
         raise RuntimeError(
             f"remote gcp.json still missing after SSH write for instance {instance_id}"
@@ -336,7 +332,9 @@ def _retry_on_ssh_transport_error(
             if attempt < retries:
                 logger.warning(
                     "ssh_transport_timeout attempt=%s/%s — retrying in %.0fs",
-                    attempt, retries, backoff_sec * attempt,
+                    attempt,
+                    retries,
+                    backoff_sec * attempt,
                 )
                 time.sleep(backoff_sec * attempt)
                 continue
@@ -538,7 +536,11 @@ def train_with_cheapest_instance(
             last_boot_error = exc
             logger.error(
                 "launch_offer failed offer_id=%s job_id=%s attempt=%s/%s error=%s",
-                next_offer["id"], job_id, attempts, max_launch_attempts, exc,
+                next_offer["id"],
+                job_id,
+                attempts,
+                max_launch_attempts,
+                exc,
             )
             blacklist = _add_offer_blacklist(
                 blacklist, int(next_offer["id"]), offer_blacklist_ttl_sec
@@ -599,11 +601,20 @@ def train_with_cheapest_instance(
             last_boot_error = exc
             logger.warning(
                 "boot_timeout instance_id=%s offer_id=%s attempt=%s/%s job_id=%s error=%s",
-                launch.instance_id, next_offer["id"], attempts, max_launch_attempts, job_id, exc,
+                launch.instance_id,
+                next_offer["id"],
+                attempts,
+                max_launch_attempts,
+                job_id,
+                exc,
             )
             # Boot timeout is transient (slow boot, flaky network) — use a shorter TTL
             # than CUDA failures so the offer can be retried sooner in future jobs.
-            _boot_ttl = boot_timeout_blacklist_ttl_sec if boot_timeout_blacklist_ttl_sec is not None else offer_blacklist_ttl_sec
+            _boot_ttl = (
+                boot_timeout_blacklist_ttl_sec
+                if boot_timeout_blacklist_ttl_sec is not None
+                else offer_blacklist_ttl_sec
+            )
             blacklist = _add_offer_blacklist(blacklist, int(next_offer["id"]), _boot_ttl)
             host_id = next_offer.get("host_id") or next_offer.get("machine_id")
             if host_id:

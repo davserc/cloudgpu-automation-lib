@@ -71,7 +71,10 @@ def wait_for_ssh(
             if status_msg != _last_status_msg:
                 logger.info(
                     "wait_for_ssh: status_change instance_id=%s actual_status=%s status_msg=%s job_id=%s",
-                    instance_id, actual_status, status_msg[:200], job_id,
+                    instance_id,
+                    actual_status,
+                    status_msg[:200],
+                    job_id,
                 )
                 _last_status_msg = status_msg
             if (
@@ -81,7 +84,9 @@ def wait_for_ssh(
             ):
                 logger.error(
                     "instance_id=%s job_id=%s container_error status_msg=%s",
-                    instance_id, job_id, status_msg[:300],
+                    instance_id,
+                    job_id,
+                    status_msg[:300],
                 )
                 raise TimeoutError(
                     f"Instance {instance_id} container failed to start: {status_msg[:120]} job_id={job_id}"
@@ -89,7 +94,10 @@ def wait_for_ssh(
             if actual_status in ("stopped", "offline", "exited", "deleted"):
                 logger.error(
                     "instance_id=%s job_id=%s dead_status actual_status=%s status_msg=%s",
-                    instance_id, job_id, actual_status, status_msg[:200],
+                    instance_id,
+                    job_id,
+                    actual_status,
+                    status_msg[:200],
                 )
                 raise TimeoutError(
                     f"Instance {instance_id} is {actual_status} — container exited job_id={job_id}"
@@ -110,7 +118,10 @@ def wait_for_ssh(
             if not _tcp_up_logged:
                 logger.info(
                     "wait_for_ssh: tcp_up instance_id=%s host=%s port=%s job_id=%s",
-                    instance_id, host, port, job_id,
+                    instance_id,
+                    host,
+                    port,
+                    job_id,
                 )
                 _tcp_up_logged = True
 

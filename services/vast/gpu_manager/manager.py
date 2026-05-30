@@ -556,7 +556,9 @@ class VastGPUManager:
             kwargs["env"] = " ".join(env_parts)
 
         if image_login:
-            kwargs["login"] = image_login  # SDK param name is "login", maps to "image_login" in API body
+            kwargs["login"] = (
+                image_login  # SDK param name is "login", maps to "image_login" in API body
+            )
 
         logger.info("Launching instance from offer %d with image=%s", offer_id, image)
         before_ids: set[int] = set()
