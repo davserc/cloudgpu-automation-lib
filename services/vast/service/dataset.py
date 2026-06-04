@@ -36,6 +36,7 @@ def _build_onstart_cmd(
     gcp_sa_b64: str | None, install_gsutil: bool
 ) -> tuple[dict[str, str] | None, str | None]:
     import os
+
     ssh_pubkey = os.getenv("VAST_SSH_PUBLIC_KEY", "")
     onstart_parts = []
     if ssh_pubkey:
