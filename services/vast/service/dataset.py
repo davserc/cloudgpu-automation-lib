@@ -35,10 +35,16 @@ def _get_user_access_token(gcp_sa_b64: str) -> str | None:
 def _build_onstart_cmd(
     gcp_sa_b64: str | None, install_gsutil: bool
 ) -> tuple[dict[str, str] | None, str | None]:
-    if not gcp_sa_b64:
-        return None, None
-    env_vars = {"GCP_SA_B64": gcp_sa_b64}
+    import os
+    ssh_pubkey = os.getenv("VAST_SSH_PUBLIC_KEY", "")
     onstart_parts = []
+    if ssh_pubkey:
+        onstart_parts.append("mkdir -p /root/.ssh")
+        onstart_parts.append(f"echo {ssh_pubkey!r} >> /root/.ssh/authorized_keys")
+        onstart_parts.append("chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys")
+    if not gcp_sa_b64:
+        return None, " ; ".join(onstart_parts) if onstart_parts else None
+    env_vars = {"GCP_SA_B64": gcp_sa_b64}
     if install_gsutil:
         onstart_parts.append("apt-get update && apt-get install -y google-cloud-cli")
     onstart_parts.append("printf %s \"$GCP_SA_B64\" | tr -d '\\r' | base64 -d > /root/gcp.json")
@@ -48,7 +54,7 @@ def _build_onstart_cmd(
     )
     onstart_parts.append("gcloud auth list || true")
     onstart_parts.append("gsutil ls gs://unlu-genai-serranodavid-computer_vision_yolo || true")
-    return env_vars, " && ".join(onstart_parts)
+    return env_vars, " ; ".join(onstart_parts)
 
 
 def _build_train_command(
