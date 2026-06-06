@@ -2,6 +2,11 @@
 .env
 keys/
 
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
 # Virtual environment
 venv/
 

@@ -35,17 +35,18 @@ make destroy ID=<instance_id> # Clean up when done
 ## Setup
 
 ```bash
-# 1. Clone and enter directory
-cd gpu
+# 1. Clonar el repositorio
+git clone https://github.com/davserc/cloudgpu-automation-lib.git
+cd cloudgpu-automation-lib
 
-# 2. Install dependencies
+# 2. Instalar dependencias
 make install
 
-# 3. Configure API key
+# 3. Configurar API key
 cp .env.example .env
-# Edit .env and add your API key from https://cloud.vast.ai/account/
+# Editar .env y agregar la API key desde https://cloud.vast.ai/account/
 
-# 4. Setup SSH key (generates key if needed and uploads to Vast.ai)
+# 4. Configurar clave SSH (genera la clave si no existe y la sube a Vast.ai)
 make ssh-setup
 ```
 
@@ -207,18 +208,34 @@ make destroy ID=29001783                                # Clean up
 | `make billing` | Show billing history |
 | `make images` | List Docker images |
 
+## Tests
+
+```bash
+# Instalar dependencias de desarrollo
+make dev
+
+# Ejecutar suite de tests con cobertura
+./venv/bin/pytest
+
+# Solo tests sin cobertura
+./venv/bin/pytest --no-cov
+
+# Cobertura por módulo
+./venv/bin/pytest --cov=services --cov-report=term-missing
+```
+
 ## Development
 
 ```bash
-# Install dev tools (pre-commit, ruff)
+# Instalar herramientas de desarrollo (pre-commit, ruff)
 make dev
 
-# Run linter
+# Ejecutar linter
 make lint
 
-# Format code
+# Formatear código
 make format
 
-# Run all checks
+# Ejecutar todos los checks (pre-commit)
 make check
 ```
